@@ -572,7 +572,6 @@ async def ticketsetup(ctx, *args, **kwargs):
     )
     embed.set_footer(text="Faisal Mod • Support System")
 
-    await ctx.message.delete()
     await ctx.send(embed=embed, view=TicketSetupView())
 
 

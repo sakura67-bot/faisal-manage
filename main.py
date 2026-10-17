@@ -18,7 +18,6 @@ TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("BOT_OWNER_ID", "0"))
 PORT = int(os.getenv("PORT", 8080))  # Provided by Render automatically
 
-# On Render, if using a Persistent Disk attached at e.g. /var/data, set CONFIG_PATH in Render Dashboard
 CONFIG_FILE = os.getenv("CONFIG_PATH", "config.json")
 
 intents = discord.Intents.default()
@@ -110,8 +109,14 @@ def guild_setting(setting, guild_id):
 # PERMISSION & LIMIT HELPERS
 # =========================
 
+def user_is_owner(ctx):
+    """Checks if the command runner is either the Bot Owner or Server Owner."""
+    return ctx.author.id == OWNER_ID or ctx.author.id == ctx.guild.owner_id
+
+
 def user_is_supervisor(ctx):
-    if ctx.author.id == OWNER_ID:
+    """Checks if user is Bot Owner, Server Owner, or has the Supervisor Role."""
+    if user_is_owner(ctx):
         return True
     role_id = guild_setting("supervisor_roles", ctx.guild.id)
     if not role_id:
@@ -120,13 +125,15 @@ def user_is_supervisor(ctx):
 
 
 def user_is_staff(ctx):
+    """Checks if user is Supervisor, Owner, or has Kick Members permission/staff role."""
     if user_is_supervisor(ctx) or ctx.author.guild_permissions.kick_members:
         return True
     return any("staff" in r.name.lower() or "trial" in r.name.lower() or "mod" in r.name.lower() for r in ctx.author.roles)
 
 
 def check_and_increment_action_limit(ctx, action_type, limit=3):
-    if user_is_supervisor(ctx) or ctx.author.id == OWNER_ID:
+    """Tracks daily moderation actions (Exempts Bot Owner, Server Owner, & Supervisors)."""
+    if user_is_supervisor(ctx):
         return True, 0
 
     import time
@@ -365,8 +372,8 @@ async def demo(ctx, staff: discord.Member, target_role: discord.Role = None, *ar
 @commands.guild_only()
 async def super(ctx, member: discord.Member, *args, **kwargs):
     """Assigns the supervisor role."""
-    if ctx.author.id != OWNER_ID:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner can use this command.", color=discord.Color.red()))
+    if not user_is_owner(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
 
     role_id = guild_setting("supervisor_roles", ctx.guild.id)
@@ -485,8 +492,8 @@ async def staffintro(ctx, *args, **kwargs):
 @commands.guild_only()
 async def staff(ctx, member: discord.Member, *args, **kwargs):
     """Assigns Staff Team and Trial Mod/Moderator roles automatically."""
-    if ctx.author.id != OWNER_ID:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner can use this command.", color=discord.Color.red()))
+    if not user_is_owner(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
 
     staff_team_role = discord.utils.find(lambda r: "staff team" in r.name.lower(), ctx.guild.roles)
@@ -531,8 +538,8 @@ async def role(ctx, member: discord.Member, target_role: discord.Role, *args, **
 @commands.guild_only()
 async def steal(ctx, emoji: str, name: str = None, *args, **kwargs):
     """Steals an emoji into the server."""
-    if ctx.author.id != OWNER_ID:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner can use this command.", color=discord.Color.red()))
+    if not user_is_owner(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
 
     import re
@@ -557,8 +564,8 @@ async def steal(ctx, emoji: str, name: str = None, *args, **kwargs):
 @commands.guild_only()
 async def ticketsetup(ctx, *args, **kwargs):
     """Deploys the persistent ticket creation panel."""
-    if ctx.author.id != OWNER_ID and not user_is_supervisor(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the owner or supervisors can set up tickets.", color=discord.Color.red()))
+    if not user_is_supervisor(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the owners or supervisors can set up tickets.", color=discord.Color.red()))
         return
 
     embed = discord.Embed(
@@ -720,8 +727,8 @@ async def roll(ctx, *args, **kwargs):
 @commands.guild_only()
 async def ranks(ctx, *args, **kwargs):
     """Shows current rank ladder configuration."""
-    if ctx.author.id != OWNER_ID:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner can use this command.", color=discord.Color.red()))
+    if not user_is_owner(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
 
     ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id), [])
@@ -739,8 +746,8 @@ async def ranks(ctx, *args, **kwargs):
 @commands.guild_only()
 async def ranks_add(ctx, role: discord.Role, *args, **kwargs):
     """Adds a role to the rank ladder sequence (lowest to highest)."""
-    if ctx.author.id != OWNER_ID:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner can use this command.", color=discord.Color.red()))
+    if not user_is_owner(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
 
     if role.is_default() or role.managed:
@@ -775,8 +782,8 @@ async def ranks_add(ctx, role: discord.Role, *args, **kwargs):
 @commands.guild_only()
 async def ranks_clear(ctx, *args, **kwargs):
     """Clears the entire rank ladder configuration."""
-    if ctx.author.id != OWNER_ID:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner can use this command.", color=discord.Color.red()))
+    if not user_is_owner(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
 
     guild_id = str(ctx.guild.id)
@@ -795,8 +802,8 @@ async def ranks_clear(ctx, *args, **kwargs):
 @bot.command()
 @commands.guild_only()
 async def setstaffsupervisor(ctx, assigned_role: discord.Role, *args, **kwargs):
-    if ctx.author.id != OWNER_ID:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner can use this command.", color=discord.Color.red()))
+    if not user_is_owner(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
 
     config["supervisor_roles"][str(ctx.guild.id)] = assigned_role.id
@@ -807,8 +814,8 @@ async def setstaffsupervisor(ctx, assigned_role: discord.Role, *args, **kwargs):
 @bot.command()
 @commands.guild_only()
 async def setpromodemo(ctx, channel: discord.TextChannel, *args, **kwargs):
-    if ctx.author.id != OWNER_ID:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner can use this command.", color=discord.Color.red()))
+    if not user_is_owner(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
 
     config["promodemo_channels"][str(ctx.guild.id)] = channel.id
@@ -819,8 +826,8 @@ async def setpromodemo(ctx, channel: discord.TextChannel, *args, **kwargs):
 @bot.command()
 @commands.guild_only()
 async def setaudit(ctx, channel: discord.TextChannel, *args, **kwargs):
-    if ctx.author.id != OWNER_ID:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner can use this command.", color=discord.Color.red()))
+    if not user_is_owner(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
 
     config["audit_channels"][str(ctx.guild.id)] = channel.id
@@ -832,101 +839,4 @@ async def setaudit(ctx, channel: discord.TextChannel, *args, **kwargs):
 @commands.guild_only()
 async def staffsettings(ctx, *args, **kwargs):
     """Displays current server staff configurations and rank ladder."""
-    if ctx.author.id != OWNER_ID and not user_is_supervisor(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to view staff settings.", color=discord.Color.red()))
-        return
-
-    supervisor_id = guild_setting("supervisor_roles", ctx.guild.id)
-    promo_id = guild_setting("promodemo_channels", ctx.guild.id)
-    audit_id = guild_setting("audit_channels", ctx.guild.id)
-    ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id), [])
-
-    supervisor = ctx.guild.get_role(int(supervisor_id)) if supervisor_id else None
-    promo_channel = ctx.guild.get_channel(int(promo_id)) if promo_id else None
-    audit_channel = ctx.guild.get_channel(int(audit_id)) if audit_id else None
-    
-    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else "Not configured (`>ranks add @role`)"
-
-    embed = discord.Embed(
-        title=f"{EMOJIS['gear']} Faisal Mod • Server Settings",
-        color=discord.Color.blurple(),
-        timestamp=discord.utils.utcnow()
-    )
-
-    embed.add_field(
-        name=f"{EMOJIS['shield']} Supervisor Role",
-        value=supervisor.mention if supervisor else "Not configured (`>setstaffsupervisor @role`)",
-        inline=False
-    )
-    embed.add_field(
-        name=f"{EMOJIS['announcement']} Announcement Channel",
-        value=promo_channel.mention if promo_channel else "Not configured (`>setpromodemo #channel`)",
-        inline=False
-    )
-    embed.add_field(
-        name=f"{EMOJIS['audit']} Audit Log Channel",
-        value=audit_channel.mention if audit_channel else "Not configured (`>setaudit #channel`)",
-        inline=False
-    )
-    embed.add_field(
-        name=f"{EMOJIS['ladder']} Rank Ladder Sequence",
-        value=ladder_str,
-        inline=False
-    )
-    embed.add_field(
-        name=f"{EMOJIS['warning']} Staff Daily Quota",
-        value="Max **3 Kicks / 3 Bans per 24 hours** for Staff Members",
-        inline=False
-    )
-
-    embed.set_footer(text=f"{ctx.guild.name} • Configuration Dashboard", icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
-    await ctx.reply(embed=embed)
-
-
-# =========================
-# HELP COMMAND
-# =========================
-
-@bot.command(name="help")
-async def help_command(ctx, *args, **kwargs):
-    embed = discord.Embed(title=f"{EMOJIS['gear']} Faisal Mod • Command Center", description="Here are all available command modules:", color=discord.Color.blurple())
-    embed.add_field(name=f"{EMOJIS['shield']} Staff & Management", value="`>promo`, `>demo`, `>super`, `>superintro`, `>staffintro`, `>staff`, `>role`, `>steal`", inline=False)
-    embed.add_field(name=f"{EMOJIS['warning']} Moderation", value="`>kick`, `>ban`, `>clear`, `>mute`", inline=False)
-    embed.add_field(name=f"{EMOJIS['ticket']} Support & Tickets", value="`>ticketsetup`", inline=False)
-    embed.add_field(name=f"{EMOJIS['user']} Utility & Info", value="`>ping`, `>serverinfo`, `>userinfo`, `>avatar`", inline=False)
-    embed.add_field(name=f"{EMOJIS['success']} Fun & Games", value="`>coinflip`, `>roll`", inline=False)
-    embed.add_field(name=f"{EMOJIS['gear']} Setup", value="`>ranks add @role`, `>ranks clear`, `>setstaffsupervisor`, `>setpromodemo`, `>setaudit`, `>staffsettings`", inline=False)
-    await ctx.reply(embed=embed, mention_author=False)
-
-
-# =========================
-# EVENTS & STARTUP
-# =========================
-
-@bot.event
-async def on_ready():
-    bot.add_view(TicketSetupView())
-    bot.add_view(TicketCloseView())
-    logging.info("Faisal Mod logged in as %s", bot.user)
-
-
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
-        return
-    if isinstance(error, commands.CheckFailure):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
-        return
-    
-    logging.exception("Command error:", exc_info=error)
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Error: `{str(error)}`", color=discord.Color.red()))
-
-
-async def main():
-    load_config()
-    asyncio.create_task(start_web_server())
-    await bot.start(TOKEN)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    if not user_is_supervisor(

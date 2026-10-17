@@ -303,9 +303,9 @@ async def change_staff_role(ctx, member, target_role, action):
 # MANAGEMENT & STAFF COMMANDS
 # =========================
 
-@bot.command()
+@bot.command(name="promo")
 @commands.guild_only()
-async def promo(ctx, staff: discord.Member, target_role: discord.Role = None, *args, **kwargs):
+async def promo(ctx, staff: discord.Member, target_role: discord.Role = None):
     """Promotes a staff member."""
     if not user_is_supervisor(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
@@ -334,9 +334,9 @@ async def promo(ctx, staff: discord.Member, target_role: discord.Role = None, *a
     await change_staff_role(ctx, staff, target_role, "promote")
 
 
-@bot.command()
+@bot.command(name="demo")
 @commands.guild_only()
-async def demo(ctx, staff: discord.Member, target_role: discord.Role = None, *args, **kwargs):
+async def demo(ctx, staff: discord.Member, target_role: discord.Role = None):
     """Demotes a staff member from their highest ladder rank."""
     if not user_is_supervisor(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
@@ -364,9 +364,9 @@ async def demo(ctx, staff: discord.Member, target_role: discord.Role = None, *ar
     await change_staff_role(ctx, staff, target_role, "demote")
 
 
-@bot.command()
+@bot.command(name="super")
 @commands.guild_only()
-async def super(ctx, member: discord.Member, *args, **kwargs):
+async def super_cmd(ctx, member: discord.Member):
     """Assigns the supervisor role."""
     if not user_is_owner(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
@@ -384,9 +384,9 @@ async def super(ctx, member: discord.Member, *args, **kwargs):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Assigned supervisor role to {member.mention}.", color=discord.Color.green()))
 
 
-@bot.command()
+@bot.command(name="superintro")
 @commands.guild_only()
-async def superintro(ctx, *args, **kwargs):
+async def superintro(ctx):
     """Deletes the trigger message and introduces supervisor commands."""
     try:
         await ctx.message.delete()
@@ -436,9 +436,9 @@ async def superintro(ctx, *args, **kwargs):
     await ctx.send(embed=embed)
 
 
-@bot.command()
+@bot.command(name="staffintro")
 @commands.guild_only()
-async def staffintro(ctx, *args, **kwargs):
+async def staffintro(ctx):
     """Deletes the trigger message and introduces staff moderation commands."""
     try:
         await ctx.message.delete()
@@ -484,9 +484,9 @@ async def staffintro(ctx, *args, **kwargs):
     await ctx.send(embed=embed)
 
 
-@bot.command()
+@bot.command(name="staff")
 @commands.guild_only()
-async def staff(ctx, member: discord.Member, *args, **kwargs):
+async def staff_cmd(ctx, member: discord.Member):
     """Assigns Staff Team and Trial Mod/Moderator roles automatically."""
     if not user_is_owner(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
@@ -514,9 +514,9 @@ async def staff(ctx, member: discord.Member, *args, **kwargs):
     await audit(ctx.guild, f"Staff roles ({assigned_mentions}) given to {member} ({member.id}) by {ctx.author}")
 
 
-@bot.command()
+@bot.command(name="role")
 @commands.guild_only()
-async def role(ctx, member: discord.Member, target_role: discord.Role, *args, **kwargs):
+async def role_cmd(ctx, member: discord.Member, target_role: discord.Role):
     """Toggles a role on a member."""
     if not user_is_supervisor(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
@@ -530,9 +530,9 @@ async def role(ctx, member: discord.Member, target_role: discord.Role, *args, **
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['promo']} Added {target_role.mention} to {member.mention}.", color=discord.Color.green()))
 
 
-@bot.command()
+@bot.command(name="steal")
 @commands.guild_only()
-async def steal(ctx, emoji: str, name: str = None, *args, **kwargs):
+async def steal(ctx, emoji: str, name: str = None):
     """Steals an emoji into the server."""
     if not user_is_owner(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
@@ -556,9 +556,9 @@ async def steal(ctx, emoji: str, name: str = None, *args, **kwargs):
 # TICKET SETUP COMMAND
 # =========================
 
-@bot.command()
+@bot.command(name="ticketsetup")
 @commands.guild_only()
-async def ticketsetup(ctx, *args, **kwargs):
+async def ticketsetup(ctx):
     """Deploys the persistent ticket creation panel."""
     if not user_is_supervisor(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the owners or supervisors can set up tickets.", color=discord.Color.red()))
@@ -579,7 +579,7 @@ async def ticketsetup(ctx, *args, **kwargs):
 # MODERATION COMMANDS
 # =========================
 
-@bot.command()
+@bot.command(name="kick")
 @commands.guild_only()
 async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
     """Kicks a member (Staff capped at 3 per 24 hours)."""
@@ -600,7 +600,7 @@ async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} I lack permissions to kick that member.", color=discord.Color.red()))
 
 
-@bot.command()
+@bot.command(name="ban")
 @commands.guild_only()
 async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
     """Bans a member (Staff capped at 3 per 24 hours)."""
@@ -621,7 +621,7 @@ async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} I lack permissions to ban that member.", color=discord.Color.red()))
 
 
-@bot.command()
+@bot.command(name="clear")
 @commands.guild_only()
 async def clear(ctx, amount: int = 5):
     """Purges messages."""
@@ -634,7 +634,7 @@ async def clear(ctx, amount: int = 5):
     await msg.delete(delay=3)
 
 
-@bot.command()
+@bot.command(name="mute")
 @commands.guild_only()
 async def mute(ctx, member: discord.Member, *, reason="No reason provided"):
     """Timeouts a member."""
@@ -655,16 +655,16 @@ async def mute(ctx, member: discord.Member, *, reason="No reason provided"):
 # UTILITY & INFO COMMANDS
 # =========================
 
-@bot.command()
+@bot.command(name="ping")
 @commands.guild_only()
-async def ping(ctx, *args, **kwargs):
+async def ping(ctx):
     """Shows bot latency."""
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Pong! Latency: `{round(bot.latency * 1000)}ms`", color=discord.Color.blue()))
 
 
-@bot.command()
+@bot.command(name="serverinfo")
 @commands.guild_only()
-async def serverinfo(ctx, *args, **kwargs):
+async def serverinfo(ctx):
     """Shows server info."""
     g = ctx.guild
     embed = discord.Embed(title=f"{EMOJIS['gear']} {g.name} Information", color=discord.Color.blurple())
@@ -674,9 +674,9 @@ async def serverinfo(ctx, *args, **kwargs):
     await ctx.reply(embed=embed)
 
 
-@bot.command()
+@bot.command(name="userinfo")
 @commands.guild_only()
-async def userinfo(ctx, member: discord.Member = None, *args, **kwargs):
+async def userinfo(ctx, member: discord.Member = None):
     """Shows user info."""
     m = member or ctx.author
     embed = discord.Embed(title=f"{EMOJIS['user']} {m} Info", color=m.color)
@@ -686,9 +686,9 @@ async def userinfo(ctx, member: discord.Member = None, *args, **kwargs):
     await ctx.reply(embed=embed)
 
 
-@bot.command()
+@bot.command(name="avatar")
 @commands.guild_only()
-async def avatar(ctx, member: discord.Member = None, *args, **kwargs):
+async def avatar(ctx, member: discord.Member = None):
     """Shows user avatar."""
     m = member or ctx.author
     embed = discord.Embed(title=f"{EMOJIS['user']} Avatar for {m}", color=discord.Color.blurple())
@@ -700,15 +700,15 @@ async def avatar(ctx, member: discord.Member = None, *args, **kwargs):
 # FUN & MISC COMMANDS
 # =========================
 
-@bot.command()
-async def coinflip(ctx, *args, **kwargs):
+@bot.command(name="coinflip")
+async def coinflip(ctx):
     """Flips a coin."""
     result = random.choice(["Heads", "Tails"])
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} The coin landed on: **{result}**", color=discord.Color.gold()))
 
 
-@bot.command()
-async def roll(ctx, *args, **kwargs):
+@bot.command(name="roll")
+async def roll(ctx):
     """Rolls a dice (1-6)."""
     result = random.randint(1, 6)
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} You rolled a **{result}**!", color=discord.Color.gold()))
@@ -720,7 +720,7 @@ async def roll(ctx, *args, **kwargs):
 
 @bot.group(invoke_without_command=True)
 @commands.guild_only()
-async def ranks(ctx, *args, **kwargs):
+async def ranks(ctx):
     """Shows current rank ladder configuration."""
     if not user_is_owner(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
@@ -739,7 +739,7 @@ async def ranks(ctx, *args, **kwargs):
 
 @ranks.command(name="add")
 @commands.guild_only()
-async def ranks_add(ctx, role: discord.Role, *args, **kwargs):
+async def ranks_add(ctx, role: discord.Role):
     """Adds a role to the rank ladder sequence (lowest to highest)."""
     if not user_is_owner(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
@@ -775,7 +775,7 @@ async def ranks_add(ctx, role: discord.Role, *args, **kwargs):
 
 @ranks.command(name="clear")
 @commands.guild_only()
-async def ranks_clear(ctx, *args, **kwargs):
+async def ranks_clear(ctx):
     """Clears the entire rank ladder configuration."""
     if not user_is_owner(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
@@ -794,9 +794,9 @@ async def ranks_clear(ctx, *args, **kwargs):
     await ctx.reply(embed=embed)
 
 
-@bot.command()
+@bot.command(name="setstaffsupervisor")
 @commands.guild_only()
-async def setstaffsupervisor(ctx, assigned_role: discord.Role, *args, **kwargs):
+async def setstaffsupervisor(ctx, assigned_role: discord.Role):
     if not user_is_owner(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
@@ -806,9 +806,9 @@ async def setstaffsupervisor(ctx, assigned_role: discord.Role, *args, **kwargs):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Supervisor role set to {assigned_role.mention}.", color=discord.Color.green()))
 
 
-@bot.command()
+@bot.command(name="setpromodemo")
 @commands.guild_only()
-async def setpromodemo(ctx, channel: discord.TextChannel, *args, **kwargs):
+async def setpromodemo(ctx, channel: discord.TextChannel):
     if not user_is_owner(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
@@ -818,9 +818,9 @@ async def setpromodemo(ctx, channel: discord.TextChannel, *args, **kwargs):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Promo channel set to {channel.mention}.", color=discord.Color.green()))
 
 
-@bot.command()
+@bot.command(name="setaudit")
 @commands.guild_only()
-async def setaudit(ctx, channel: discord.TextChannel, *args, **kwargs):
+async def setaudit(ctx, channel: discord.TextChannel):
     if not user_is_owner(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
@@ -830,9 +830,9 @@ async def setaudit(ctx, channel: discord.TextChannel, *args, **kwargs):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Audit channel set to {channel.mention}.", color=discord.Color.green()))
 
 
-@bot.command()
+@bot.command(name="staffsettings")
 @commands.guild_only()
-async def staffsettings(ctx, *args, **kwargs):
+async def staffsettings(ctx):
     """Displays current server staff configurations and rank ladder."""
     if not user_is_supervisor(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to view staff settings.", color=discord.Color.red()))
@@ -890,7 +890,7 @@ async def staffsettings(ctx, *args, **kwargs):
 # =========================
 
 @bot.command(name="help")
-async def help_command(ctx, *args, **kwargs):
+async def help_command(ctx):
     embed = discord.Embed(title=f"{EMOJIS['gear']} Faisal Mod • Command Center", description="Here are all available command modules:", color=discord.Color.blurple())
     embed.add_field(name=f"{EMOJIS['shield']} Staff & Management", value="`>promo`, `>demo`, `>super`, `>superintro`, `>staffintro`, `>staff`, `>role`, `>steal`", inline=False)
     embed.add_field(name=f"{EMOJIS['warning']} Moderation", value="`>kick`, `>ban`, `>clear`, `>mute`", inline=False)

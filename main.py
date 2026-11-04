@@ -65,7 +65,8 @@ EMOJIS = {
     "user": "<:ntl_user:1556434847856328726>",
     "bullet": "<:MW_arrow_right:1560001178937598175>",
     "welcome": "<a:wel:1560947318277283893>",
-    "ticket": "<:ticket:1560983848345665637>"
+    "ticket": "<:ticket:1560983848345665637>",
+    "money": "<a:money:1567589905234661484>"
 }
 
 # Original emoji sources are kept so the bot can recreate app emojis after restarts.
@@ -128,7 +129,8 @@ config = {
     "promodemo_channels": {},
     "audit_channels": {},
     "rank_ladders": {},
-    "staff_limits": {}
+    "staff_limits": {},
+    "economy": {}
 }
 
 
@@ -155,6 +157,18 @@ def save_config():
     except OSError:
         logging.exception("Could not save configuration")
 
+
+def economy_account(guild_id, user_id):
+    guild_accounts = config.setdefault("economy", {}).setdefault(str(guild_id), {})
+    account = guild_accounts.setdefault(str(user_id), {"balance": 0, "last_daily": 0, "last_work": 0})
+    account["balance"] = max(0, int(account.get("balance", 0)))
+    account.setdefault("last_daily", 0)
+    account.setdefault("last_work", 0)
+    return account
+
+
+def economy_embed(message, color=discord.Color.blurple()):
+    return discord.Embed(description=f"{EMOJIS['money']} {message}", color=color)
 
 def guild_setting(setting, guild_id):
     return config[setting].get(str(guild_id))
@@ -634,6 +648,151 @@ async def ticketsetup(ctx):
 # MODERATION COMMANDS
 # =========================
 
+# =========================
+# ECONOMY & ADMIN COMMANDS
+# =========================
+
+@bot.command(name="balance", aliases=["bal"])
+@commands.guild_only()
+async def balance(ctx, member: discord.Member = None):
+    """Check your own or another member's wallet."""
+    member = member or ctx.author
+    account = economy_account(ctx.guild.id, member.id)
+    await ctx.reply(embed=economy_embed(f"**{member.display_name}** has **{account['balance']:,}** coins."))
+
+
+@bot.command(name="daily")
+@commands.guild_only()
+async def daily(ctx):
+    """Claim a once-per-day coin reward."""
+    import time
+    account = economy_account(ctx.guild.id, ctx.author.id)
+    remaining = 86400 - (int(time.time()) - int(account.get("last_daily", 0)))
+    if remaining > 0:
+        hours, minutes = divmod(remaining, 3600)
+        await ctx.reply(embed=economy_embed(f"Your next daily reward is ready in **{hours}h {minutes // 60}m**."))
+        return
+    reward = random.randint(100, 250)
+    account["balance"] += reward
+    account["last_daily"] = int(time.time())
+    save_config()
+    await ctx.reply(embed=economy_embed(f"Daily reward claimed! You received **{reward}** coins. Balance: **{account['balance']:,}**."))
+
+
+@bot.command(name="work", aliases=["job"])
+@commands.guild_only()
+async def work(ctx):
+    """Work for a random coin reward; 60-second cooldown."""
+    import time
+    account = economy_account(ctx.guild.id, ctx.author.id)
+    remaining = 60 - (int(time.time()) - int(account.get("last_work", 0)))
+    if remaining > 0:
+        await ctx.reply(embed=economy_embed(f"Catch your breath! You can work again in **{remaining}s**."))
+        return
+    reward = random.randint(20, 80)
+    jobs = ["delivered a dragon's lunch", "organized a wizard's bookshelf", "DJ'd a tiny robot party", "found a pile of coins", "walked a very polite dinosaur"]
+    account["balance"] += reward
+    account["last_work"] = int(time.time())
+    save_config()
+    await ctx.reply(embed=economy_embed(f"You {random.choice(jobs)} and earned **{reward}** coins. Balance: **{account['balance']:,}**."))
+
+
+@bot.command(name="pay", aliases=["transfer"])
+@commands.guild_only()
+async def pay(ctx, member: discord.Member, amount: int):
+    """Send coins to another member."""
+    if member.bot or member.id == ctx.author.id or not 1 <= amount <= 1000000:
+        await ctx.reply(embed=economy_embed("Choose another member and an amount between 1 and 1,000,000."))
+        return
+    sender = economy_account(ctx.guild.id, ctx.author.id)
+    if sender["balance"] < amount:
+        await ctx.reply(embed=economy_embed("You don't have enough coins for that payment."))
+        return
+    recipient = economy_account(ctx.guild.id, member.id)
+    sender["balance"] -= amount
+    recipient["balance"] += amount
+    save_config()
+    await ctx.reply(embed=economy_embed(f"Sent **{amount:,}** coins to {member.mention}. Your balance is **{sender['balance']:,}**."))
+
+
+@bot.command(name="leaderboard", aliases=["richlist", "topcoins"])
+@commands.guild_only()
+async def leaderboard(ctx):
+    """Show the ten richest members in this server."""
+    guild_accounts = config.setdefault("economy", {}).setdefault(str(ctx.guild.id), {})
+    ranked = sorted(guild_accounts.items(), key=lambda item: int(item[1].get("balance", 0)), reverse=True)[:10]
+    if not ranked:
+        await ctx.reply(embed=economy_embed("No wallets yet. Start with `>daily`!"))
+        return
+    rows = [f"**{rank}.** <@{user_id}> — **{int(account.get('balance', 0)):,}** coins" for rank, (user_id, account) in enumerate(ranked, 1)]
+    embed = economy_embed("🏆 **Coin Leaderboard**\n" + "\n".join(rows))
+    await ctx.reply(embed=embed)
+
+
+async def require_economy_admin(ctx):
+    if user_is_supervisor(ctx):
+        return True
+    await ctx.reply(embed=economy_embed("Only the server owner or configured supervisor can manage member balances.", discord.Color.red()))
+    return False
+
+
+@bot.command(name="addmoney", aliases=["addcoins"])
+@commands.guild_only()
+async def addmoney(ctx, member: discord.Member, amount: int):
+    """Admin: add coins to a member's wallet."""
+    if not await require_economy_admin(ctx): return
+    if not 1 <= amount <= 1000000000:
+        await ctx.reply(embed=economy_embed("Amount must be from 1 to 1,000,000,000.")); return
+    account = economy_account(ctx.guild.id, member.id)
+    account["balance"] += amount
+    save_config()
+    await ctx.reply(embed=economy_embed(f"Added **{amount:,}** coins to {member.mention}. New balance: **{account['balance']:,}**."))
+
+
+@bot.command(name="removemoney", aliases=["removecoins"])
+@commands.guild_only()
+async def removemoney(ctx, member: discord.Member, amount: int):
+    """Admin: remove coins from a member's wallet."""
+    if not await require_economy_admin(ctx): return
+    if not 1 <= amount <= 1000000000:
+        await ctx.reply(embed=economy_embed("Amount must be from 1 to 1,000,000,000.")); return
+    account = economy_account(ctx.guild.id, member.id)
+    removed = min(amount, account["balance"])
+    account["balance"] -= removed
+    save_config()
+    await ctx.reply(embed=economy_embed(f"Removed **{removed:,}** coins from {member.mention}. New balance: **{account['balance']:,}**."))
+
+
+@bot.command(name="setmoney", aliases=["setcoins"])
+@commands.guild_only()
+async def setmoney(ctx, member: discord.Member, amount: int):
+    """Admin: set a member's wallet balance."""
+    if not await require_economy_admin(ctx): return
+    if not 0 <= amount <= 1000000000:
+        await ctx.reply(embed=economy_embed("Balance must be from 0 to 1,000,000,000.")); return
+    account = economy_account(ctx.guild.id, member.id)
+    previous = account["balance"]
+    account["balance"] = amount
+    save_config()
+    await ctx.reply(embed=economy_embed(f"Set {member.mention}'s balance from **{previous:,}** to **{amount:,}** coins."))
+
+
+@bot.command(name="resetmoney", aliases=["resetcoins"])
+@commands.guild_only()
+async def resetmoney(ctx, member: discord.Member = None):
+    """Admin: reset one member's wallet, or the whole server economy."""
+    if not await require_economy_admin(ctx): return
+    accounts = config.setdefault("economy", {}).setdefault(str(ctx.guild.id), {})
+    if member:
+        account = economy_account(ctx.guild.id, member.id)
+        account.update({"balance": 0, "last_daily": 0, "last_work": 0})
+        message = f"Reset {member.mention}'s wallet."
+    else:
+        accounts.clear()
+        message = "Reset every wallet in this server."
+    save_config()
+    await ctx.reply(embed=economy_embed(message, discord.Color.orange()))
+
 @bot.command(name="kick")
 @commands.guild_only()
 async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
@@ -949,6 +1108,8 @@ async def help_command(ctx):
     embed = discord.Embed(title=f"{EMOJIS['gear']} Supreme • Command Center", description="Here are all available command modules:", color=discord.Color.blurple())
     embed.add_field(name=f"{EMOJIS['shield']} Staff & Management", value="`>promo`, `>demo`, `>super`, `>superintro`, `>staffintro`, `>staff`, `>role`, `>steal`", inline=False)
     embed.add_field(name=f"{EMOJIS['warning']} Moderation", value="`>kick`, `>ban`, `>clear`, `>mute`", inline=False)
+    embed.add_field(name=f"{EMOJIS['money']} Economy", value="`>balance [@member]`, `>daily`, `>work`, `>pay @member amount`, `>leaderboard`", inline=False)
+    embed.add_field(name=f"{EMOJIS['money']} Economy Admin (Owner/Supervisor)", value="`>addmoney @member amount`, `>removemoney @member amount`, `>setmoney @member amount`, `>resetmoney [@member]`", inline=False)
     embed.add_field(name=f"{EMOJIS['ticket']} Support & Tickets", value="`>ticketsetup`", inline=False)
     embed.add_field(name=f"{EMOJIS['user']} Utility & Info", value="`>ping`, `>serverinfo`, `>userinfo`, `>avatar`", inline=False)
     embed.add_field(name=f"{EMOJIS['success']} Fun & Games", value="`>coinflip`, `>roll`", inline=False)
@@ -988,6 +1149,10 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+
+
 
 
 

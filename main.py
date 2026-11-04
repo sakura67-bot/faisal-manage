@@ -68,6 +68,61 @@ EMOJIS = {
     "ticket": "<:ticket:1560983848345665637>"
 }
 
+# Original emoji sources are kept so the bot can recreate app emojis after restarts.
+EMOJI_SOURCES = dict(EMOJIS)
+
+async def install_application_emojis():
+    """Save source emoji images locally and create missing application emojis."""
+    fetch_emojis = getattr(bot, "fetch_application_emojis", None)
+    create_emoji = getattr(bot, "create_application_emoji", None)
+    if not callable(fetch_emojis) or not callable(create_emoji):
+        logging.warning("Automatic application emojis need discord.py 2.5 or newer.")
+        return
+
+    try:
+        existing = {emoji.name: emoji for emoji in await fetch_emojis()}
+    except Exception as exc:
+        logging.warning("Could not fetch application emojis: %s", exc)
+        return
+
+    folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "emojis")
+    os.makedirs(folder, exist_ok=True)
+    installed = 0
+
+    async with aiohttp.ClientSession() as session:
+        for name, source_markup in EMOJI_SOURCES.items():
+            if name in existing:
+                EMOJIS[name] = str(existing[name])
+                continue
+
+            source = discord.PartialEmoji.from_str(source_markup)
+            if source.id is None:
+                continue
+
+            extension = "gif" if source.animated else "png"
+            image_path = os.path.join(folder, f"{name}.{extension}")
+            try:
+                if os.path.isfile(image_path):
+                    with open(image_path, "rb") as image_file:
+                        image_data = image_file.read()
+                else:
+                    image_url = f"https://cdn.discordapp.com/emojis/{source.id}.{extension}?size=128&quality=lossless"
+                    async with session.get(image_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                        response.raise_for_status()
+                        image_data = await response.read()
+                    if not image_data or len(image_data) > 256 * 1024:
+                        raise ValueError("Emoji image must be non-empty and no larger than 256 KiB")
+                    with open(image_path, "wb") as image_file:
+                        image_file.write(image_data)
+
+                created = await create_emoji(name=name, image=image_data)
+                EMOJIS[name] = str(created)
+                existing[name] = created
+                installed += 1
+            except Exception as exc:
+                logging.warning("Could not install application emoji %s: %s", name, exc)
+
+    logging.info("Application emoji setup finished; created %s new emojis.", installed)
 config = {
     "supervisor_roles": {},
     "promodemo_channels": {},
@@ -909,6 +964,7 @@ async def help_command(ctx):
 async def on_ready():
     bot.add_view(TicketSetupView())
     bot.add_view(TicketCloseView())
+    await install_application_emojis()
     logging.info("Supreme logged in as %s", bot.user)
 
 
@@ -932,5 +988,8 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+
 
 

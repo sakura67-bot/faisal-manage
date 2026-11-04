@@ -3,6 +3,9 @@ import json
 import logging
 import random
 import asyncio
+import secrets
+import time
+import urllib.parse
 import aiohttp
 import discord
 from discord.ext import commands
@@ -16,7 +19,11 @@ logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("BOT_TOKEN")
 OWNER_ID = int(os.getenv("BOT_OWNER_ID", "0"))
-PORT = int(os.getenv("PORT", 8080))
+PORT = int(os.getenv("SERVER_PORT", os.getenv("PORT", 8080)))
+DISCORD_CLIENT_ID = os.getenv("DISCORD_CLIENT_ID", "")
+DISCORD_CLIENT_SECRET = os.getenv("DISCORD_CLIENT_SECRET", "")
+DISCORD_REDIRECT_URI = os.getenv("DISCORD_REDIRECT_URI", "")
+WEB_SESSIONS = {}
 
 CONFIG_FILE = os.getenv("CONFIG_PATH", "config.json")
 
@@ -24,28 +31,442 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 
+
+def dynamic_prefix(bot_instance, message):
+    guild_id = str(message.guild.id) if message.guild else ""
+    configured = config.get("prefixes", {}).get(guild_id, ">") if "config" in globals() else ">"
+    return commands.when_mentioned_or(configured)(bot_instance, message)
+
+
 bot = commands.Bot(
-    command_prefix=">",
+    command_prefix=dynamic_prefix,
     intents=intents,
     help_command=None
 )
 
 # =========================
-# RENDER KEEP-ALIVE HTTP SERVER
+# BOT-HOSTING.NET WEB DASHBOARD
 # =========================
 
+DASHBOARD_HTML = r"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Supreme Bot Dashboard</title>
+<style>
+:root{color-scheme:dark;--bg:#0c1020;--card:#171d32;--line:#2a3453;--accent:#9b7bff;--text:#f4f2ff;--muted:#aab2cc}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#25204b,var(--bg) 45%);font:16px system-ui,sans-serif;color:var(--text);min-height:100vh}.wrap{max-width:1050px;margin:0 auto;padding:34px 20px}.tag{color:#c3b5ff;font-weight:700;letter-spacing:.12em;text-transform:uppercase;font-size:12px}.hero{margin:22px 0}.card{background:linear-gradient(145deg,#1b223b,#151a2c);border:1px solid var(--line);border-radius:18px;padding:22px;margin:17px 0;box-shadow:0 20px 55px #05071266}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.field{display:flex;flex-direction:column;gap:8px;margin:10px 0}label{font-weight:650;color:#dedaff}input,select,textarea{background:#10162a;color:var(--text);border:1px solid #394365;border-radius:10px;padding:12px;font:inherit;width:100%}textarea{min-height:115px;resize:vertical}button,.button{display:inline-flex;align-items:center;justify-content:center;background:var(--accent);color:#111225;border:0;border-radius:10px;padding:12px 18px;font-weight:750;text-decoration:none;cursor:pointer;margin:6px 8px 0 0}button.secondary{background:#2b3554;color:var(--text)}.bar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.status{min-height:26px;color:#b8f3d1;margin-top:12px}.small{font-size:13px;color:var(--muted)}.hidden{display:none}.row{display:flex;gap:10px;align-items:center}h1{font-size:clamp(30px,5vw,46px);margin:8px 0}h2{margin:0 0 7px}p{color:var(--muted);line-height:1.55}.preview{white-space:pre-wrap;background:#10162a;border-left:4px solid var(--accent);padding:14px;border-radius:8px;min-height:70px;color:#ddd}@media(max-width:700px){.grid{grid-template-columns:1fr}.wrap{padding:20px 14px}.card{padding:16px}}
+</style></head><body><main class="wrap"><div class="bar"><div><div class="tag">Supreme Bot • Bot-Hosting.net</div><div class="small">Server dashboard</div></div><button class="secondary" onclick="logout()">Log out</button></div>
+<section class="hero"><h1>Bot control panel</h1><p>Manage the server settings and publish panels or embeds. Choose a server where you have management access and Supreme Bot is installed.</p></section>
+<section class="card"><div class="field"><label for="guild">Discord server</label><select id="guild"></select></div><div id="settings" class="hidden"><h2>Server settings</h2><p class="small">Prefix, staff destinations, embed appearance, and ticket panel content are saved per server.</p><div class="grid">
+<div class="field"><label for="prefix">Command prefix</label><input id="prefix" maxlength="5" value=">"><span class="small">Example: `>` or `!`</span></div>
+<div class="field"><label for="supervisor">Supervisor role</label><select id="supervisor"></select></div>
+<div class="field"><label for="promodemo">Promotion / demotion channel</label><select id="promodemo"></select></div><div class="field"><label for="audit">Audit log channel</label><select id="audit"></select></div>
+<div class="field"><label for="embedColor">Default embed color</label><input id="embedColor" type="color" value="#5865f2"></div><div class="field"><label for="footer">Default embed footer</label><input id="footer" maxlength="200" placeholder="Supreme Bot"></div>
+<div class="field"><label for="ticketTitle">Ticket panel title</label><input id="ticketTitle" maxlength="100"></div><div class="field"><label for="ticketChannel">Ticket panel channel</label><select id="ticketChannel"></select></div>
+<div class="field"><label for="ticketDescription">Ticket panel description</label><textarea id="ticketDescription" maxlength="2000"></textarea></div>
+<div class="field"><label for="dailyMin">Daily reward minimum</label><input id="dailyMin" type="number" min="0" max="1000000"></div><div class="field"><label for="dailyMax">Daily reward maximum</label><input id="dailyMax" type="number" min="0" max="1000000"></div><div class="field"><label for="workMin">Work reward minimum</label><input id="workMin" type="number" min="0" max="1000000"></div><div class="field"><label for="workMax">Work reward maximum</label><input id="workMax" type="number" min="0" max="1000000"></div><div class="field"><label for="workCooldown">Work cooldown (seconds)</label><input id="workCooldown" type="number" min="10" max="86400"></div>
+</div><button onclick="saveSettings()">Save server settings</button><button class="secondary" onclick="postPanel()">Post ticket dropdown</button><div id="settingsStatus" class="status"></div></div><div id="empty" class="small hidden">No servers found where you manage settings and Supreme Bot is installed.</div></section>
+<section id="moneyCard" class="card hidden"><h2>Economy manager</h2><p class="small">Change a member’s coins. Your Discord account needs server management access.</p><div class="grid"><div class="field"><label for="moneyUser">Member ID</label><input id="moneyUser" inputmode="numeric" placeholder="Discord user ID"></div><div class="field"><label for="moneyAction">Action</label><select id="moneyAction"><option value="add">Add coins</option><option value="remove">Remove coins</option><option value="set">Set balance</option><option value="reset">Reset wallet</option></select></div><div class="field"><label for="moneyAmount">Amount</label><input id="moneyAmount" type="number" min="0" max="1000000000" value="100"></div></div><button onclick="manageMoney()">Apply economy change</button><div id="moneyStatus" class="status"></div></section><section id="embedCard" class="card hidden"><h2>Embed builder</h2><p class="small">Create and send a custom embed to a channel. Field rows use `name | value | inline`; use `true` or `false` for inline.</p><div class="grid"><div class="field"><label for="embedChannel">Post in</label><select id="embedChannel"></select></div><div class="field"><label for="customColor">Embed color</label><input id="customColor" type="color" value="#5865f2"></div><div class="field"><label for="customTitle">Title</label><input id="customTitle" maxlength="256" placeholder="Announcement"></div><div class="field"><label for="customFooter">Footer</label><input id="customFooter" maxlength="200" placeholder="Optional footer"></div>
+<div class="field"><label for="customAuthor">Author label</label><input id="customAuthor" maxlength="256" placeholder="Optional author"></div><div class="field"><label for="customUrl">Title link (HTTPS URL)</label><input id="customUrl" maxlength="2048" placeholder="https://example.com"></div><div class="field"><label for="customImage">Image URL (HTTPS)</label><input id="customImage" maxlength="2048" placeholder="https://example.com/image.png"></div><div class="field"><label for="customThumb">Thumbnail URL (HTTPS)</label><input id="customThumb" maxlength="2048" placeholder="https://example.com/thumb.png"></div><div class="field"><label for="customDescription">Description</label><textarea id="customDescription" maxlength="4000" placeholder="Write your embed message"></textarea></div><div class="field"><label for="customFields">Fields (one per line)</label><textarea id="customFields" placeholder="Rules | Be kind to everyone | false&#10;Need help? | Open a ticket below | true"></textarea></div></div><div class="preview" id="preview">Embed preview will appear here.</div><button onclick="sendEmbed()">Send embed</button><div id="embedStatus" class="status"></div></section>
+<section id="activityCard" class="card hidden"><h2>Bot activity</h2><p class="small">This changes the bot-wide Discord presence. Only the bot owner can save it.</p><div class="grid"><div class="field"><label for="activityType">Activity</label><select id="activityType"><option>playing</option><option>streaming</option><option>listening</option><option>watching</option><option>competing</option></select></div><div class="field"><label for="activityText">Activity text</label><input id="activityText" maxlength="128" placeholder="Supreme Bot"></div></div><button class="secondary" onclick="saveActivity()">Save activity</button><div id="activityStatus" class="status"></div></section>
+<p class="small">The website runs inside this bot deployment. Activate a Bot-Hosting.net HTTPS subdomain and set the Discord OAuth redirect URL to `/oauth/callback`.</p></main>
+<script>
+const guildSelect=document.getElementById('guild'),settings=document.getElementById('settings'),statusBox=document.getElementById('settingsStatus');
+async function api(path,options={}){const response=await fetch(path,{credentials:'same-origin',headers:{'Content-Type':'application/json',...(options.headers||{})},...options});if(response.status===401){location.href='/login';throw new Error('Please sign in again.')}const data=await response.json();if(!response.ok)throw new Error(data.error||'Request failed');return data}
+function fill(id,items,selected,label){const el=document.getElementById(id);el.replaceChildren(new Option(label,''));for(const item of items)el.add(new Option(item.name,item.id));if(selected)el.value=String(selected)}
+async function loadGuilds(){try{const data=await api('/api/guilds');if(!data.guilds.length){document.getElementById('empty').classList.remove('hidden');return}for(const g of data.guilds)guildSelect.add(new Option(g.name,g.id));await loadConfig()}catch(e){statusBox.textContent=e.message}}
+async function loadConfig(){try{const d=await api('/api/guild/'+guildSelect.value);fill('supervisor',d.roles,d.supervisor_role,'No supervisor role');fill('promodemo',d.channels,d.promodemo_channel,'Not set');fill('audit',d.channels,d.audit_channel,'Not set');fill('ticketChannel',d.channels,null,'Choose a channel');fill('embedChannel',d.channels,null,'Choose a channel');document.getElementById('prefix').value=d.prefix;document.getElementById('embedColor').value=d.embed_color;document.getElementById('footer').value=d.embed_footer;document.getElementById('ticketTitle').value=d.ticket_title;document.getElementById('ticketDescription').value=d.ticket_description;document.getElementById('dailyMin').value=d.economy.daily_min;document.getElementById('dailyMax').value=d.economy.daily_max;document.getElementById('workMin').value=d.economy.work_min;document.getElementById('workMax').value=d.economy.work_max;document.getElementById('workCooldown').value=d.economy.work_cooldown;document.getElementById('activityType').value=d.activity_type||'playing';document.getElementById('activityText').value=d.activity_text||'';document.getElementById('activityCard').classList.toggle('hidden',!d.can_set_activity);settings.classList.remove('hidden');document.getElementById('moneyCard').classList.remove('hidden');document.getElementById('embedCard').classList.remove('hidden');document.getElementById('empty').classList.add('hidden')}catch(e){statusBox.textContent=e.message}}
+guildSelect.addEventListener('change',loadConfig);
+async function saveSettings(){statusBox.textContent='Saving…';try{await api('/api/guild/'+guildSelect.value+'/settings',{method:'POST',body:JSON.stringify({prefix:document.getElementById('prefix').value,supervisor_role:document.getElementById('supervisor').value,promodemo_channel:document.getElementById('promodemo').value,audit_channel:document.getElementById('audit').value,embed_color:document.getElementById('embedColor').value,embed_footer:document.getElementById('footer').value,ticket_title:document.getElementById('ticketTitle').value,ticket_description:document.getElementById('ticketDescription').value,daily_min:Number(document.getElementById('dailyMin').value),daily_max:Number(document.getElementById('dailyMax').value),work_min:Number(document.getElementById('workMin').value),work_max:Number(document.getElementById('workMax').value),work_cooldown:Number(document.getElementById('workCooldown').value)})});statusBox.textContent='Settings saved.'}catch(e){statusBox.textContent=e.message}}
+async function postPanel(){const channel=document.getElementById('ticketChannel').value;if(!channel){statusBox.textContent='Choose a ticket panel channel first.';return}statusBox.textContent='Posting…';try{await api('/api/guild/'+guildSelect.value+'/ticket-panel',{method:'POST',body:JSON.stringify({channel_id:channel})});statusBox.textContent='Ticket dropdown posted.'}catch(e){statusBox.textContent=e.message}}
+function updatePreview(){const title=document.getElementById('customTitle').value,description=document.getElementById('customDescription').value;document.getElementById('preview').textContent=(title?'◆ '+title+'\n':'')+(description||'Embed preview will appear here.');document.getElementById('preview').style.borderColor=document.getElementById('customColor').value}
+['customTitle','customDescription','customColor'].forEach(id=>document.getElementById(id).addEventListener('input',updatePreview));
+async function sendEmbed(){const channel=document.getElementById('embedChannel').value;if(!channel){document.getElementById('embedStatus').textContent='Choose a channel first.';return}const fields=document.getElementById('customFields').value.split('\n').map(x=>x.trim()).filter(Boolean).map(line=>{const p=line.split('|');return{name:(p[0]||'').trim(),value:(p[1]||'').trim(),inline:(p[2]||'').trim().toLowerCase()==='true'}});const box=document.getElementById('embedStatus');box.textContent='Sending…';try{await api('/api/guild/'+guildSelect.value+'/embed',{method:'POST',body:JSON.stringify({channel_id:channel,title:document.getElementById('customTitle').value,description:document.getElementById('customDescription').value,color:document.getElementById('customColor').value,footer:document.getElementById('customFooter').value,author:document.getElementById('customAuthor').value,title_url:document.getElementById('customUrl').value,image_url:document.getElementById('customImage').value,thumbnail_url:document.getElementById('customThumb').value,fields})});box.textContent='Embed sent.'}catch(e){box.textContent=e.message}}
+async function manageMoney(){const box=document.getElementById('moneyStatus');box.textContent='Saving…';try{await api('/api/guild/'+guildSelect.value+'/money',{method:'POST',body:JSON.stringify({user_id:document.getElementById('moneyUser').value,action:document.getElementById('moneyAction').value,amount:Number(document.getElementById('moneyAmount').value)})});box.textContent='Wallet updated.'}catch(e){box.textContent=e.message}}
+async function saveActivity(){const box=document.getElementById('activityStatus');box.textContent='Saving…';try{await api('/api/activity',{method:'POST',body:JSON.stringify({type:document.getElementById('activityType').value,text:document.getElementById('activityText').value})});box.textContent='Activity updated.'}catch(e){box.textContent=e.message}}
+async function logout(){await fetch('/logout',{method:'POST',credentials:'same-origin'});location.href='/'}loadGuilds();
+</script></body></html>"""
+LANDING_HTML = """<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Supreme Bot</title><style>body{margin:0;background:#101326;color:#f4f2ff;font:17px system-ui;min-height:100vh;display:grid;place-items:center}.card{max-width:620px;margin:20px;padding:38px;background:#1b2037;border:1px solid #343c5e;border-radius:20px}h1{font-size:42px;margin:10px 0}p{color:#b6bfd8;line-height:1.6}.button{display:inline-block;background:#9b7bff;color:#101020;padding:13px 18px;border-radius:10px;font-weight:bold;text-decoration:none}.note{font-size:14px}</style></head><body><main class="card"><div>SUPREME BOT • DASHBOARD</div><h1>Configure your server</h1><p>Sign in with Discord to manage your server prefix, staff settings, ticket panels, embeds, economy, and more.</p><a class="button" href="/login">Continue with Discord</a><p class="note">The bot must already be invited to your server. Set DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, and DISCORD_REDIRECT_URI in the hosting environment to enable sign-in.</p></main></body></html>"""
+
+
+def get_web_session(request):
+    session_id = request.cookies.get("supreme_session")
+    session = WEB_SESSIONS.get(session_id)
+    if session and session["expires"] > time.time():
+        return session
+    if session_id:
+        WEB_SESSIONS.pop(session_id, None)
+    return None
+
+
+def web_user_can_manage(session, guild_id):
+    guild_info = next((g for g in session.get("guilds", []) if str(g.get("id")) == str(guild_id)), None)
+    if not guild_info:
+        return False
+    try:
+        permissions = int(guild_info.get("permissions", "0"))
+    except (TypeError, ValueError):
+        permissions = 0
+    owner = bool(guild_info.get("owner"))
+    extra_owner = str(session["user"]["id"]) in {str(uid) for uid in config.get("extra_owners", {}).get(str(guild_id), [])}
+    bot_owner = int(OWNER_ID) > 0 and str(session["user"]["id"]) == str(OWNER_ID)
+    return bot_owner or owner or extra_owner or bool(permissions & 0x8) or bool(permissions & 0x20)
+
+
+def response_json_error(message, status=400):
+    return web.json_response({"error": message}, status=status)
+
+
 async def handle_ping(request):
-    return web.Response(text="Supreme is online and running on Render!")
+    if get_web_session(request):
+        raise web.HTTPFound("/dashboard")
+    return web.Response(text=LANDING_HTML, content_type="text/html")
+
+
+async def handle_dashboard(request):
+    if not get_web_session(request):
+        raise web.HTTPFound("/")
+    return web.Response(text=DASHBOARD_HTML, content_type="text/html")
+
+
+async def handle_login(request):
+    if not (DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET and DISCORD_REDIRECT_URI):
+        return web.Response(text="Set DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, and DISCORD_REDIRECT_URI in the hosting environment first.", status=503)
+    state = secrets.token_urlsafe(24)
+    params = urllib.parse.urlencode({"client_id": DISCORD_CLIENT_ID, "redirect_uri": DISCORD_REDIRECT_URI, "response_type": "code", "scope": "identify guilds", "state": state, "prompt": "consent"})
+    response = web.HTTPFound("https://discord.com/oauth2/authorize?" + params)
+    response.set_cookie("supreme_oauth_state", state, max_age=600, httponly=True, secure=True, samesite="Lax")
+    raise response
+
+
+async def handle_oauth_callback(request):
+    state = request.query.get("state", "")
+    if not state or state != request.cookies.get("supreme_oauth_state"):
+        return web.Response(text="Login state expired. Please try again.", status=400)
+    code = request.query.get("code")
+    if not code:
+        return web.Response(text="Discord login was cancelled.", status=400)
+    token_data = {"client_id": DISCORD_CLIENT_ID, "client_secret": DISCORD_CLIENT_SECRET, "grant_type": "authorization_code", "code": code, "redirect_uri": DISCORD_REDIRECT_URI}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post("https://discord.com/api/v10/oauth2/token", data=token_data, headers={"Content-Type": "application/x-www-form-urlencoded"}) as response:
+                tokens = await response.json(content_type=None)
+                if response.status != 200:
+                    return web.Response(text="Discord token exchange failed. Check the dashboard OAuth settings.", status=502)
+            headers = {"Authorization": f"Bearer {tokens['access_token']}"}
+            async with session.get("https://discord.com/api/v10/users/@me", headers=headers) as response:
+                user = await response.json(content_type=None)
+                if response.status != 200:
+                    return web.Response(text="Could not verify your Discord account.", status=502)
+            async with session.get("https://discord.com/api/v10/users/@me/guilds", headers=headers) as response:
+                guilds = await response.json(content_type=None)
+                if response.status != 200:
+                    return web.Response(text="Could not read your Discord server list.", status=502)
+    except (aiohttp.ClientError, asyncio.TimeoutError, KeyError):
+        logging.exception("Discord OAuth request failed")
+        return web.Response(text="Discord login could not be completed. Please try again.", status=502)
+
+    session_id = secrets.token_urlsafe(32)
+    WEB_SESSIONS[session_id] = {"user": {"id": str(user["id"]), "username": user.get("username", "Discord user")}, "guilds": guilds, "expires": time.time() + 12 * 60 * 60}
+    result = web.HTTPFound("/dashboard")
+    result.set_cookie("supreme_session", session_id, max_age=12 * 60 * 60, httponly=True, secure=True, samesite="Lax")
+    result.del_cookie("supreme_oauth_state")
+    raise result
+
+
+async def handle_logout(request):
+    session_id = request.cookies.get("supreme_session")
+    if session_id:
+        WEB_SESSIONS.pop(session_id, None)
+    response = web.json_response({"ok": True})
+    response.del_cookie("supreme_session")
+    return response
+
+
+async def web_authorized_guild(request):
+    session = get_web_session(request)
+    if not session:
+        return None, None, response_json_error("Sign in with Discord first.", 401)
+    guild_id = request.match_info["guild_id"]
+    if not web_user_can_manage(session, guild_id):
+        return None, None, response_json_error("You do not have permission to configure this server.", 403)
+    guild = bot.get_guild(int(guild_id))
+    if guild is None:
+        return None, None, response_json_error("Supreme Bot is not in that server.", 404)
+    return session, guild, None
+
+
+async def handle_api_guilds(request):
+    session = get_web_session(request)
+    if not session:
+        return response_json_error("Sign in with Discord first.", 401)
+    result = []
+    for info in session.get("guilds", []):
+        guild = bot.get_guild(int(info["id"]))
+        if guild and web_user_can_manage(session, guild.id):
+            result.append({"id": str(guild.id), "name": guild.name})
+    return web.json_response({"guilds": sorted(result, key=lambda item: item["name"].lower())})
+
+
+async def handle_api_guild(request):
+    _, guild, error = await web_authorized_guild(request)
+    if error:
+        return error
+    gid = str(guild.id)
+    roles = [{"id": str(role.id), "name": role.name} for role in guild.roles if not role.is_default() and not role.managed]
+    channels = [{"id": str(channel.id), "name": "#" + channel.name} for channel in guild.text_channels]
+    embed_settings = get_embed_settings(gid)
+    ticket_settings = get_ticket_settings(gid)
+    activity_settings = config.get("activity", {})
+    session = get_web_session(request)
+    return web.json_response({
+        "roles": roles, "channels": channels,
+        "supervisor_role": config.get("supervisor_roles", {}).get(gid),
+        "promodemo_channel": config.get("promodemo_channels", {}).get(gid),
+        "audit_channel": config.get("audit_channels", {}).get(gid),
+        "prefix": get_server_prefix(gid),
+        "embed_color": "#%06X" % parse_embed_color(embed_settings.get("color")),
+        "embed_footer": embed_settings.get("footer", "Supreme Bot"),
+        "ticket_title": ticket_settings.get("title", "Support Ticket Center"),
+        "ticket_description": ticket_settings.get("description", "Choose a ticket type from the dropdown below to open a private channel with our staff team."),
+        "activity_type": activity_settings.get("type", "playing"),
+        "activity_text": activity_settings.get("text", ""),
+        "can_set_activity": bool(OWNER_ID and str(session["user"]["id"]) == str(OWNER_ID)),
+        "economy": get_economy_settings(gid),
+    })
+
+
+async def handle_api_save_settings(request):
+    _, guild, error = await web_authorized_guild(request)
+    if error:
+        return error
+    try:
+        data = await request.json()
+    except (json.JSONDecodeError, web.HTTPBadRequest):
+        return response_json_error("Invalid settings data.")
+    if not isinstance(data, dict):
+        return response_json_error("Invalid settings data.")
+
+    gid = str(guild.id)
+    role_id = str(data.get("supervisor_role", ""))
+    if role_id and (not role_id.isdigit() or guild.get_role(int(role_id)) is None):
+        return response_json_error("Choose a role from this server.")
+    valid_channels = {str(channel.id) for channel in guild.text_channels}
+    channel_values = {"promodemo_channels": str(data.get("promodemo_channel", "")), "audit_channels": str(data.get("audit_channel", ""))}
+    if any(value and value not in valid_channels for value in channel_values.values()):
+        return response_json_error("Choose channels from this server.")
+
+    prefix = str(data.get("prefix", ">"))
+    if not 1 <= len(prefix) <= 5 or any(char.isspace() for char in prefix):
+        return response_json_error("Prefix must be 1–5 non-space characters.")
+    color_text = str(data.get("embed_color", "#5865F2"))
+    try:
+        color_value = color_text.removeprefix("#")
+        if len(color_value) != 6:
+            raise ValueError
+        int(color_value, 16)
+    except ValueError:
+        return response_json_error("Choose a valid 6-digit embed color.")
+    footer = str(data.get("embed_footer", "Supreme Bot"))[:200]
+    ticket_title = str(data.get("ticket_title", "Support Ticket Center")).strip()
+    ticket_description = str(data.get("ticket_description", "Choose a ticket type from the dropdown below to open a private channel with our staff team.")).strip()
+    if not ticket_title or len(ticket_title) > 100 or len(ticket_description) > 2000:
+        return response_json_error("Ticket title must be 1–100 characters and description no more than 2,000.")
+    try:
+        economy_settings = {
+            "daily_min": int(data.get("daily_min", 100)),
+            "daily_max": int(data.get("daily_max", 250)),
+            "work_min": int(data.get("work_min", 20)),
+            "work_max": int(data.get("work_max", 80)),
+            "work_cooldown": int(data.get("work_cooldown", 60)),
+        }
+    except (TypeError, ValueError):
+        return response_json_error("Economy settings must be whole numbers.")
+    if any(value < 0 or value > 1000000 for key, value in economy_settings.items() if key != "work_cooldown") or not 10 <= economy_settings["work_cooldown"] <= 86400:
+        return response_json_error("Rewards must be 0–1,000,000 and cooldown 10–86,400 seconds.")
+    if economy_settings["daily_min"] > economy_settings["daily_max"] or economy_settings["work_min"] > economy_settings["work_max"]:
+        return response_json_error("Each reward minimum must be less than or equal to its maximum.")
+    config.setdefault("prefixes", {})[gid] = prefix
+    if role_id: config.setdefault("supervisor_roles", {})[gid] = role_id
+    else: config.setdefault("supervisor_roles", {}).pop(gid, None)
+    for key, value in channel_values.items():
+        if value: config.setdefault(key, {})[gid] = value
+        else: config.setdefault(key, {}).pop(gid, None)
+    config.setdefault("embed_settings", {})[gid] = {"color": "#" + color_value.upper(), "footer": footer}
+    config.setdefault("ticket_settings", {})[gid] = {"title": ticket_title, "description": ticket_description}
+    config.setdefault("economy_settings", {})[gid] = economy_settings
+    save_config()
+    return web.json_response({"ok": True})
+
+
+async def handle_api_ticket_panel(request):
+    _, guild, error = await web_authorized_guild(request)
+    if error:
+        return error
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            return response_json_error("Choose a valid ticket channel.")
+        channel_id = int(data.get("channel_id", 0))
+    except (json.JSONDecodeError, web.HTTPBadRequest, TypeError, ValueError):
+        return response_json_error("Choose a valid ticket channel.")
+    channel = guild.get_channel(channel_id)
+    if not isinstance(channel, discord.TextChannel):
+        return response_json_error("Choose a text channel from this server.")
+    ticket_settings = get_ticket_settings(guild.id)
+    panel = discord.Embed(title=ticket_settings["title"], description=ticket_settings["description"], color=discord.Color(parse_embed_color(get_embed_settings(guild.id)["color"])), timestamp=discord.utils.utcnow())
+    apply_embed_theme(guild.id, panel)
+    try:
+        await channel.send(embed=panel, view=TicketSetupView(), allowed_mentions=discord.AllowedMentions.none())
+    except discord.Forbidden:
+        return response_json_error("Supreme Bot needs permission to send messages and embeds in that channel.", 403)
+    except discord.HTTPException:
+        logging.exception("Failed to post website ticket panel")
+        return response_json_error("Could not post the ticket panel.", 502)
+    return web.json_response({"ok": True})
+
+
+async def handle_api_embed(request):
+    session, guild, error = await web_authorized_guild(request)
+    if error:
+        return error
+    try:
+        data = await request.json()
+    except (json.JSONDecodeError, web.HTTPBadRequest):
+        return response_json_error("Invalid embed data.")
+    if not isinstance(data, dict):
+        return response_json_error("Invalid embed data.")
+    try:
+        channel_id = int(data.get("channel_id", 0))
+    except (TypeError, ValueError):
+        return response_json_error("Choose a channel from this server.")
+    channel = guild.get_channel(channel_id)
+    if not isinstance(channel, discord.TextChannel):
+        return response_json_error("Choose a text channel from this server.")
+    title = str(data.get("title", "")).strip()
+    description = str(data.get("description", "")).strip()
+    footer = str(data.get("footer", "")).strip()
+    author = str(data.get("author", "")).strip()
+    title_url = str(data.get("title_url", "")).strip()
+    image_url = str(data.get("image_url", "")).strip()
+    thumbnail_url = str(data.get("thumbnail_url", "")).strip()
+    if len(title) > 256 or len(description) > 4096 or len(footer) > 200 or len(author) > 256:
+        return response_json_error("Embed title, description, or footer is too long.")
+    try:
+        color_text = str(data.get("color", "#5865F2")).removeprefix("#")
+        if len(color_text) != 6: raise ValueError
+        color = int(color_text, 16)
+    except ValueError:
+        return response_json_error("Choose a valid 6-digit color.")
+    fields = data.get("fields", [])
+    if not isinstance(fields, list) or len(fields) > 25:
+        return response_json_error("Embeds can have up to 25 fields.")
+    if not title and not description and not fields:
+        return response_json_error("Add a title, description, or at least one field.")
+    urls = [url for url in (title_url, image_url, thumbnail_url) if url]
+    if any(len(url) > 2048 or urllib.parse.urlparse(url).scheme != "https" or not urllib.parse.urlparse(url).netloc for url in urls):
+        return response_json_error("Embed links must be valid HTTPS URLs.")
+    embed = discord.Embed(title=title or None, description=description or None, color=discord.Color(color), url=title_url or None)
+    if author: embed.set_author(name=author)
+    if image_url: embed.set_image(url=image_url)
+    if thumbnail_url: embed.set_thumbnail(url=thumbnail_url)
+    for item in fields:
+        if not isinstance(item, dict):
+            return response_json_error("Each embed field needs a name and value.")
+        name, value = str(item.get("name", "")).strip(), str(item.get("value", "")).strip()
+        if not name or not value or len(name) > 256 or len(value) > 1024:
+            return response_json_error("Field names must be 1–256 characters and values 1–1,024 characters.")
+        embed.add_field(name=name, value=value, inline=bool(item.get("inline", False)))
+    theme_footer = get_embed_settings(guild.id).get("footer", "Supreme Bot")
+    embed.set_footer(text=footer or theme_footer)
+    try:
+        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+    except discord.Forbidden:
+        return response_json_error("Supreme Bot needs permission to send messages and embeds in that channel.", 403)
+    except discord.HTTPException:
+        logging.exception("Failed to send dashboard embed")
+        return response_json_error("Could not send this embed. Check that it fits Discord's embed limits.", 502)
+    await audit(guild, f"Dashboard embed sent by {session['user']['id']} to #{channel.name}")
+    return web.json_response({"ok": True})
+
+
+async def handle_api_money(request):
+    session, guild, error = await web_authorized_guild(request)
+    if error:
+        return error
+    try:
+        data = await request.json()
+    except (json.JSONDecodeError, web.HTTPBadRequest):
+        return response_json_error("Invalid economy action.")
+    if not isinstance(data, dict):
+        return response_json_error("Invalid economy action.")
+    user_id = str(data.get("user_id", ""))
+    if not user_id.isdigit():
+        return response_json_error("Enter a numeric Discord member ID.")
+    try:
+        member = guild.get_member(int(user_id)) or await guild.fetch_member(int(user_id))
+    except (discord.NotFound, discord.HTTPException):
+        return response_json_error("That member was not found in this server.")
+    action = str(data.get("action", ""))
+    if action not in {"add", "remove", "set", "reset"}:
+        return response_json_error("Choose add, remove, set, or reset.")
+    try:
+        amount = int(data.get("amount", 0))
+    except (TypeError, ValueError):
+        return response_json_error("Enter a whole number of coins.")
+    if action == "reset":
+        amount = 0
+    elif amount < (0 if action == "set" else 1) or amount > 1000000000:
+        return response_json_error("Amount must be within 0–1,000,000,000 coins.")
+    account = economy_account(guild.id, member.id)
+    if action == "add": account["balance"] += amount
+    elif action == "remove": account["balance"] = max(0, account["balance"] - amount)
+    elif action == "set": account["balance"] = amount
+    else: account.update({"balance": 0, "last_daily": 0, "last_work": 0})
+    save_config()
+    await audit(guild, f"Dashboard wallet {action} by {session['user']['id']}: member {member.id}, amount {amount}")
+    return web.json_response({"ok": True, "balance": account["balance"]})
+
+async def handle_api_activity(request):
+    session = get_web_session(request)
+    if not session:
+        return response_json_error("Sign in with Discord first.", 401)
+    if not OWNER_ID or str(session["user"]["id"]) != str(OWNER_ID):
+        return response_json_error("Only the bot owner can change the global activity.", 403)
+    try:
+        data = await request.json()
+    except (json.JSONDecodeError, web.HTTPBadRequest):
+        return response_json_error("Invalid activity settings.")
+    if not isinstance(data, dict):
+        return response_json_error("Invalid activity settings.")
+    activity_type = str(data.get("type", "")).lower()
+    text = str(data.get("text", "")).strip()
+    if activity_type not in ACTIVITY_TYPES or not 1 <= len(text) <= 128:
+        return response_json_error("Choose an activity type and text up to 128 characters.")
+    try:
+        await apply_bot_activity(activity_type, text)
+    except discord.HTTPException:
+        return response_json_error("Discord could not apply this activity.", 502)
+    config["activity"] = {"type": activity_type, "text": text}
+    save_config()
+    return web.json_response({"ok": True})
 
 async def start_web_server():
-    app = web.Application()
+    app = web.Application(client_max_size=64 * 1024)
     app.router.add_get("/", handle_ping)
+    app.router.add_get("/dashboard", handle_dashboard)
+    app.router.add_get("/login", handle_login)
+    app.router.add_get("/oauth/callback", handle_oauth_callback)
+    app.router.add_post("/logout", handle_logout)
+    app.router.add_get("/api/guilds", handle_api_guilds)
+    app.router.add_get("/api/guild/{guild_id}", handle_api_guild)
+    app.router.add_post("/api/guild/{guild_id}/settings", handle_api_save_settings)
+    app.router.add_post("/api/guild/{guild_id}/ticket-panel", handle_api_ticket_panel)
+    app.router.add_post("/api/guild/{guild_id}/embed", handle_api_embed)
+    app.router.add_post("/api/activity", handle_api_activity)
+    app.router.add_post("/api/guild/{guild_id}/money", handle_api_money)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
-    logging.info(f"Render keep-alive server started on port {PORT}")
-
+    logging.info("Supreme Bot dashboard started on 0.0.0.0:%s (Bot-Hosting.net SERVER_PORT)", PORT)
 
 # =========================
 # CUSTOM EMOJI CONFIGURATION
@@ -132,7 +553,11 @@ config = {
     "staff_limits": {},
     "economy": {},
     "extra_owners": {},
-    "activity": {}
+    "activity": {},
+    "prefixes": {},
+    "embed_settings": {},
+    "ticket_settings": {},
+    "economy_settings": {}
 }
 
 
@@ -171,6 +596,41 @@ def economy_account(guild_id, user_id):
 
 def economy_embed(message, color=discord.Color.blurple()):
     return discord.Embed(description=f"{EMOJIS['money']} {message}", color=color)
+
+def get_server_prefix(guild_id):
+    return config.get("prefixes", {}).get(str(guild_id), ">") if guild_id else ">"
+
+
+def get_embed_settings(guild_id):
+    defaults = {"color": "#5865F2", "footer": "Supreme Bot"}
+    return {**defaults, **config.get("embed_settings", {}).get(str(guild_id), {})}
+
+
+def get_economy_settings(guild_id):
+    defaults = {"daily_min": 100, "daily_max": 250, "work_min": 20, "work_max": 80, "work_cooldown": 60}
+    return {**defaults, **config.get("economy_settings", {}).get(str(guild_id), {})}
+
+def get_ticket_settings(guild_id):
+    defaults = {"title": f"{EMOJIS['ticket']} Support Ticket Center", "description": "Choose a ticket type from the dropdown below to open a private channel with our staff team."}
+    return {**defaults, **config.get("ticket_settings", {}).get(str(guild_id), {})}
+
+
+def parse_embed_color(value, fallback=0x5865F2):
+    try:
+        value = str(value).lstrip("#")
+        return int(value, 16) if len(value) == 6 else fallback
+    except (TypeError, ValueError):
+        return fallback
+
+
+def apply_embed_theme(guild_id, embed):
+    settings = get_embed_settings(guild_id)
+    embed.color = discord.Color(parse_embed_color(settings.get("color")))
+    default_footer = str(settings.get("footer", "")).strip()
+    if default_footer:
+        previous = getattr(embed.footer, "text", None)
+        embed.set_footer(text=f"{previous} • {default_footer}" if previous and previous != default_footer else (previous or default_footer))
+    return embed
 
 def guild_setting(setting, guild_id):
     return config[setting].get(str(guild_id))
@@ -265,16 +725,29 @@ class TicketSetupView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(label="Create Ticket", style=discord.ButtonStyle.green, custom_id="create_ticket_btn")
-    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.select(
+        placeholder="Choose a ticket type...",
+        min_values=1,
+        max_values=1,
+        custom_id="ticket_type_select",
+        options=[
+            discord.SelectOption(label="General Support", value="support", description="Ask the team for help", emoji="🎟️"),
+            discord.SelectOption(label="Report a Member", value="report", description="Privately report a server issue", emoji="🚩"),
+            discord.SelectOption(label="Other Question", value="other", description="Contact the staff team", emoji="💬"),
+        ],
+    )
+    async def create_ticket(self, interaction: discord.Interaction, select: discord.ui.Select):
         guild = interaction.guild
         member = interaction.user
+        ticket_type = select.values[0]
+        channel_name = f"ticket-{ticket_type}-{member.id}"
 
-        existing_channel = discord.utils.get(guild.text_channels, name=f"ticket-{member.name.lower()}")
+        existing_channel = discord.utils.get(guild.text_channels, name=channel_name)
         if existing_channel:
-            await interaction.response.send_message(f"{EMOJIS['error']} You already have an open ticket: {existing_channel.mention}", ephemeral=True)
+            await interaction.response.send_message(f"{EMOJIS['error']} You already have this ticket open: {existing_channel.mention}", ephemeral=True)
             return
 
+        await interaction.response.defer(ephemeral=True)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             member: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
@@ -285,35 +758,35 @@ class TicketSetupView(discord.ui.View):
         if supervisor_role_id:
             sup_role = guild.get_role(int(supervisor_role_id))
             if sup_role:
-                overwrites[sup_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+                overwrites[sup_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
         staff_team_role = discord.utils.find(lambda r: "staff team" in r.name.lower(), guild.roles)
         if staff_team_role:
-            overwrites[staff_team_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True)
+            overwrites[staff_team_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
 
         category = discord.utils.get(guild.categories, name="Support Tickets")
         if not category:
             category = await guild.create_category("Support Tickets")
 
         channel = await guild.create_text_channel(
-            name=f"ticket-{member.name}",
+            name=channel_name,
             category=category,
             overwrites=overwrites,
-            topic=f"Support ticket for {member} ({member.id})"
+            topic=f"{ticket_type.title()} ticket for {member} ({member.id})"
         )
 
         embed = discord.Embed(
-            title=f"{EMOJIS['ticket']} Support Ticket",
-            description=f"Hello {member.mention}! Support staff will be with you shortly.\nClick the button below when you are ready to close this ticket.",
+            title=f"{EMOJIS['ticket']} {ticket_type.title()} Ticket",
+            description=f"Hello {member.mention}! Support staff will be with you shortly.\nUse the button below when you are ready to close this ticket.",
             color=discord.Color.blue(),
             timestamp=discord.utils.utcnow()
         )
         embed.set_footer(text="Supreme • Ticket System")
+        apply_embed_theme(guild.id, embed)
 
         await channel.send(embed=embed, view=TicketCloseView())
-        await interaction.response.send_message(f"{EMOJIS['success']} Your ticket has been created: {channel.mention}", ephemeral=True)
-        await audit(guild, f"Ticket created by {member} ({member.id}) | Channel: {channel.name}")
-
+        await interaction.followup.send(f"{EMOJIS['success']} Your {ticket_type} ticket is ready: {channel.mention}", ephemeral=True)
+        await audit(guild, f"{ticket_type.title()} ticket created by {member} ({member.id}) | Channel: {channel.name}")
 
 # =========================
 # EMBED HELPERS
@@ -339,6 +812,7 @@ async def send_promodemo_embed(guild, member, role, action, moderator):
     embed.add_field(name=f"{EMOJIS['shield']} Action By", value=moderator.mention, inline=True)
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text=f"{guild.name} • Supreme System")
+    apply_embed_theme(guild.id, embed)
 
     try:
         await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
@@ -386,7 +860,7 @@ async def promo(ctx, staff: discord.Member, target_role: discord.Role = None):
     if target_role is None:
         ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id))
         if not ladder:
-            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} No rank ladder configured. Add roles using `>ranks add @role`", color=discord.Color.orange()))
+            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} No rank ladder configured. Add roles using `{get_server_prefix(ctx.guild.id)}ranks add @role`", color=discord.Color.orange()))
             return
 
         user_role_ids = [r.id for r in staff.roles]
@@ -417,7 +891,7 @@ async def demo(ctx, staff: discord.Member, target_role: discord.Role = None):
     if target_role is None:
         ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id))
         if not ladder:
-            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} No rank ladder configured. Add roles using `>ranks add @role`", color=discord.Color.orange()))
+            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} No rank ladder configured. Add roles using `{get_server_prefix(ctx.guild.id)}ranks add @role`", color=discord.Color.orange()))
             return
 
         user_role_ids = [r.id for r in staff.roles]
@@ -481,7 +955,7 @@ async def superintro(ctx):
     )
 
     embed.add_field(
-        name=f"{EMOJIS['promo']} `>promo @member [@role]`",
+        name=f"{EMOJIS['promo']} `{get_server_prefix(ctx.guild.id)}promo @member [@role]`",
         value=(
             f"{EMOJIS['bullet']} Promotes a staff member.\n"
             f"{EMOJIS['bullet']} **Auto Ladder:** If no role is given, advances them to the next step up."
@@ -490,7 +964,7 @@ async def superintro(ctx):
     )
 
     embed.add_field(
-        name=f"{EMOJIS['demo']} `>demo @member [@role]`",
+        name=f"{EMOJIS['demo']} `{get_server_prefix(ctx.guild.id)}demo @member [@role]`",
         value=(
             f"{EMOJIS['bullet']} Demotes a staff member.\n"
             f"{EMOJIS['bullet']} **Auto Ladder:** If no role is given, strips their highest rank to drop them down."
@@ -499,7 +973,7 @@ async def superintro(ctx):
     )
 
     embed.add_field(
-        name=f"{EMOJIS['gear']} `>role @member @role`",
+        name=f"{EMOJIS['gear']} `{get_server_prefix(ctx.guild.id)}role @member @role`",
         value=f"{EMOJIS['bullet']} Quickly toggles an extra role on or off for a member.",
         inline=False
     )
@@ -535,10 +1009,10 @@ async def staffintro(ctx):
     embed.add_field(
         name=f"{EMOJIS['warning']} Moderation Commands (Max 3 Kicks/Bans Per 24 Hours)",
         value=(
-            f"{EMOJIS['bullet']} `>kick @member [reason]` — Kicks a disruptive user from the server.\n"
-            f"{EMOJIS['bullet']} `>ban @member [reason]` — Permanently bans a rule-breaker.\n"
-            f"{EMOJIS['bullet']} `>mute @member [reason]` — Times out a user for 10 minutes.\n"
-            f"{EMOJIS['bullet']} `>clear [amount]` — Purges recent chat messages cleanly."
+            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}kick @member [reason]` — Kicks a disruptive user from the server.\n"
+            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}ban @member [reason]` — Permanently bans a rule-breaker.\n"
+            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}mute @member [reason]` — Times out a user for 10 minutes.\n"
+            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}clear [amount]` — Purges recent chat messages cleanly."
         ),
         inline=False
     )
@@ -546,8 +1020,8 @@ async def staffintro(ctx):
     embed.add_field(
         name=f"{EMOJIS['user']} Utility & Information",
         value=(
-            f"{EMOJIS['bullet']} `>userinfo [@member]` — Checks account creation, join dates, and roles.\n"
-            f"{EMOJIS['bullet']} `>avatar [@member]` — Views high-resolution profile pictures."
+            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}userinfo [@member]` — Checks account creation, join dates, and roles.\n"
+            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}avatar [@member]` — Views high-resolution profile pictures."
         ),
         inline=False
     )
@@ -636,13 +1110,9 @@ async def ticketsetup(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the owners or supervisors can set up tickets.", color=discord.Color.red()))
         return
 
-    embed = discord.Embed(
-        title=f"{EMOJIS['ticket']} Support Ticket Center",
-        description="Need assistance? Click the button below to open a private support ticket with our staff team.",
-        color=discord.Color.blurple(),
-        timestamp=discord.utils.utcnow()
-    )
-    embed.set_footer(text="Supreme • Support System")
+    ticket_settings = get_ticket_settings(ctx.guild.id)
+    embed = discord.Embed(title=ticket_settings["title"], description=ticket_settings["description"], color=discord.Color(parse_embed_color(get_embed_settings(ctx.guild.id)["color"])), timestamp=discord.utils.utcnow())
+    apply_embed_theme(ctx.guild.id, embed)
 
     await ctx.send(embed=embed, view=TicketSetupView())
 
@@ -675,7 +1145,8 @@ async def daily(ctx):
         hours, minutes = divmod(remaining, 3600)
         await ctx.reply(embed=economy_embed(f"Your next daily reward is ready in **{hours}h {minutes // 60}m**."))
         return
-    reward = random.randint(100, 250)
+    economy_settings = get_economy_settings(ctx.guild.id)
+    reward = random.randint(int(economy_settings["daily_min"]), int(economy_settings["daily_max"]))
     account["balance"] += reward
     account["last_daily"] = int(time.time())
     save_config()
@@ -688,11 +1159,12 @@ async def work(ctx):
     """Work for a random coin reward; 60-second cooldown."""
     import time
     account = economy_account(ctx.guild.id, ctx.author.id)
-    remaining = 60 - (int(time.time()) - int(account.get("last_work", 0)))
+    economy_settings = get_economy_settings(ctx.guild.id)
+    remaining = int(economy_settings["work_cooldown"]) - (int(time.time()) - int(account.get("last_work", 0)))
     if remaining > 0:
         await ctx.reply(embed=economy_embed(f"Catch your breath! You can work again in **{remaining}s**."))
         return
-    reward = random.randint(20, 80)
+    reward = random.randint(int(economy_settings["work_min"]), int(economy_settings["work_max"]))
     jobs = ["delivered a dragon's lunch", "organized a wizard's bookshelf", "DJ'd a tiny robot party", "found a pile of coins", "walked a very polite dinosaur"]
     account["balance"] += reward
     account["last_work"] = int(time.time())
@@ -725,7 +1197,7 @@ async def leaderboard(ctx):
     guild_accounts = config.setdefault("economy", {}).setdefault(str(ctx.guild.id), {})
     ranked = sorted(guild_accounts.items(), key=lambda item: int(item[1].get("balance", 0)), reverse=True)[:10]
     if not ranked:
-        await ctx.reply(embed=economy_embed("No wallets yet. Start with `>daily`!"))
+        await ctx.reply(embed=economy_embed(f"No wallets yet. Start with `{get_server_prefix(ctx.guild.id)}daily`!"))
         return
     rows = [f"**{rank}.** <@{user_id}> — **{int(account.get('balance', 0)):,}** coins" for rank, (user_id, account) in enumerate(ranked, 1)]
     embed = economy_embed("🏆 **Coin Leaderboard**\n" + "\n".join(rows))
@@ -944,7 +1416,7 @@ async def ranks(ctx):
         return
 
     ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id), [])
-    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else "Not configured. Use `>ranks add @role`"
+    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else f"Not configured. Use `{get_server_prefix(ctx.guild.id)}ranks add @role`"
     
     embed = discord.Embed(
         title=f"{EMOJIS['ladder']} Staff Rank Ladder",
@@ -1064,7 +1536,7 @@ async def staffsettings(ctx):
     promo_channel = ctx.guild.get_channel(int(promo_id)) if promo_id else None
     audit_channel = ctx.guild.get_channel(int(audit_id)) if audit_id else None
     
-    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else "Not configured (`>ranks add @role`)"
+    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else f"Not configured (`{get_server_prefix(ctx.guild.id)}ranks add @role`)"
 
     embed = discord.Embed(
         title=f"{EMOJIS['gear']} Supreme • Server Settings",
@@ -1074,17 +1546,17 @@ async def staffsettings(ctx):
 
     embed.add_field(
         name=f"{EMOJIS['shield']} Supervisor Role",
-        value=supervisor.mention if supervisor else "Not configured (`>setstaffsupervisor @role`)",
+        value=supervisor.mention if supervisor else f"Not configured (`{get_server_prefix(ctx.guild.id)}setstaffsupervisor @role`)",
         inline=False
     )
     embed.add_field(
         name=f"{EMOJIS['announcement']} Announcement Channel",
-        value=promo_channel.mention if promo_channel else "Not configured (`>setpromodemo #channel`)",
+        value=promo_channel.mention if promo_channel else f"Not configured (`{get_server_prefix(ctx.guild.id)}setpromodemo #channel`)",
         inline=False
     )
     embed.add_field(
         name=f"{EMOJIS['audit']} Audit Log Channel",
-        value=audit_channel.mention if audit_channel else "Not configured (`>setaudit #channel`)",
+        value=audit_channel.mention if audit_channel else f"Not configured (`{get_server_prefix(ctx.guild.id)}setaudit #channel`)",
         inline=False
     )
     embed.add_field(
@@ -1189,15 +1661,16 @@ async def setactivity(ctx, activity: str, *, text: str):
 
 @bot.command(name="help")
 async def help_command(ctx):
+    prefix = get_server_prefix(ctx.guild.id if ctx.guild else None)
     embed = discord.Embed(title=f"{EMOJIS['gear']} Supreme • Command Center", description="Here are all available command modules:", color=discord.Color.blurple())
-    embed.add_field(name=f"{EMOJIS['shield']} Staff & Management", value="`>promo`, `>demo`, `>super`, `>superintro`, `>staffintro`, `>staff`, `>role`, `>steal`", inline=False)
-    embed.add_field(name=f"{EMOJIS['warning']} Moderation", value="`>kick`, `>ban`, `>clear`, `>mute`", inline=False)
-    embed.add_field(name=f"{EMOJIS['money']} Economy", value="`>balance [@member]`, `>daily`, `>work`, `>pay @member amount`, `>leaderboard`", inline=False)
-    embed.add_field(name=f"{EMOJIS['money']} Economy Admin (Owner/Supervisor)", value="`>addmoney @member amount`, `>removemoney @member amount`, `>setmoney @member amount`, `>resetmoney [@member]`", inline=False)
-    embed.add_field(name=f"{EMOJIS['ticket']} Support & Tickets", value="`>ticketsetup`", inline=False)
-    embed.add_field(name=f"{EMOJIS['user']} Utility & Info", value="`>ping`, `>serverinfo`, `>userinfo`, `>avatar`", inline=False)
-    embed.add_field(name=f"{EMOJIS['success']} Fun & Games", value="`>coinflip`, `>roll`", inline=False)
-    embed.add_field(name=f"{EMOJIS['gear']} Setup", value="`>ranks add @role`, `>ranks clear`, `>setstaffsupervisor`, `>setpromodemo`, `>setaudit`, `>staffsettings`, `>addextraowner @member`, `>removextraowner @member`, `>setactivity <playing|streaming|listening|watching|competing> <text>`", inline=False)
+    embed.add_field(name=f"{EMOJIS['shield']} Staff & Management", value=f"`{prefix}promo`, `{prefix}demo`, `{prefix}super`, `{prefix}superintro`, `{prefix}staffintro`, `{prefix}staff`, `{prefix}role`, `{prefix}steal`", inline=False)
+    embed.add_field(name=f"{EMOJIS['warning']} Moderation", value=f"`{prefix}kick`, `{prefix}ban`, `{prefix}clear`, `{prefix}mute`", inline=False)
+    embed.add_field(name=f"{EMOJIS['money']} Economy", value=f"`{prefix}balance [@member]`, `{prefix}daily`, `{prefix}work`, `{prefix}pay @member amount`, `{prefix}leaderboard`", inline=False)
+    embed.add_field(name=f"{EMOJIS['money']} Economy Admin (Owner/Supervisor)", value=f"`{prefix}addmoney @member amount`, `{prefix}removemoney @member amount`, `{prefix}setmoney @member amount`, `{prefix}resetmoney [@member]`", inline=False)
+    embed.add_field(name=f"{EMOJIS['ticket']} Support & Tickets", value=f"`{prefix}ticketsetup` (posts a ticket-type dropdown)", inline=False)
+    embed.add_field(name=f"{EMOJIS['user']} Utility & Info", value=f"`{prefix}ping`, `{prefix}serverinfo`, `{prefix}userinfo`, `{prefix}avatar`", inline=False)
+    embed.add_field(name=f"{EMOJIS['success']} Fun & Games", value=f"`{prefix}coinflip`, `{prefix}roll`", inline=False)
+    embed.add_field(name=f"{EMOJIS['gear']} Setup", value=f"`{prefix}ranks add @role`, `{prefix}ranks clear`, `{prefix}setstaffsupervisor`, `{prefix}setpromodemo`, `{prefix}setaudit`, `{prefix}staffsettings`, `{prefix}addextraowner @member`, `{prefix}removextraowner @member`, `{prefix}setactivity <playing|streaming|listening|watching|competing> <text>`", inline=False)
     await ctx.reply(embed=embed, mention_author=False)
 
 
@@ -1236,6 +1709,14 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+
+
+
+
+
+
 
 
 

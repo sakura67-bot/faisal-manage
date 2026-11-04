@@ -35,7 +35,7 @@ bot = commands.Bot(
 # =========================
 
 async def handle_ping(request):
-    return web.Response(text="Faisal Mod is online and running on Render!")
+    return web.Response(text="Supreme is online and running on Render!")
 
 async def start_web_server():
     app = web.Application()
@@ -236,7 +236,7 @@ class TicketSetupView(discord.ui.View):
             color=discord.Color.blue(),
             timestamp=discord.utils.utcnow()
         )
-        embed.set_footer(text="Faisal Mod • Ticket System")
+        embed.set_footer(text="Supreme • Ticket System")
 
         await channel.send(embed=embed, view=TicketCloseView())
         await interaction.response.send_message(f"{EMOJIS['success']} Your ticket has been created: {channel.mention}", ephemeral=True)
@@ -266,7 +266,7 @@ async def send_promodemo_embed(guild, member, role, action, moderator):
     embed.add_field(name=f"{EMOJIS['ladder']} Role", value=role.mention, inline=True)
     embed.add_field(name=f"{EMOJIS['shield']} Action By", value=moderator.mention, inline=True)
     embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text=f"{guild.name} • Faisal Mod System")
+    embed.set_footer(text=f"{guild.name} • Supreme System")
 
     try:
         await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
@@ -401,7 +401,7 @@ async def superintro(ctx):
     embed = discord.Embed(
         title=f"{EMOJIS['welcome']} Welcome Staff Supervisor!",
         description=(
-            f"Welcome to the **Faisal Mod Supervisor System**! {EMOJIS['shield']}\n"
+            f"Welcome to the **Supreme Supervisor System**! {EMOJIS['shield']}\n"
             "As a Supervisor, you have permission to manage the staff hierarchy using automated rank ladder commands."
         ),
         color=discord.Color.blurple(),
@@ -432,7 +432,7 @@ async def superintro(ctx):
         inline=False
     )
 
-    embed.set_footer(text=f"Requested by {ctx.author.display_name} • Faisal Mod Guide", icon_url=ctx.author.display_avatar.url)
+    embed.set_footer(text=f"Requested by {ctx.author.display_name} • Supreme Guide", icon_url=ctx.author.display_avatar.url)
     await ctx.send(embed=embed)
 
 
@@ -451,7 +451,7 @@ async def staffintro(ctx):
         return
 
     embed = discord.Embed(
-        title=f"{EMOJIS['welcome']} Welcome to the Faisal Mod Staff Team!",
+        title=f"{EMOJIS['welcome']} Welcome to the Supreme Staff Team!",
         description=(
             f"Hello {ctx.author.mention}! Thank you for keeping our community safe and active. {EMOJIS['shield']}\n"
             "Here is a quick introduction to your staff moderation tools and commands."
@@ -480,7 +480,7 @@ async def staffintro(ctx):
         inline=False
     )
 
-    embed.set_footer(text=f"Requested by {ctx.author.display_name} • Faisal Mod Guide", icon_url=ctx.author.display_avatar.url)
+    embed.set_footer(text=f"Requested by {ctx.author.display_name} • Supreme Guide", icon_url=ctx.author.display_avatar.url)
     await ctx.send(embed=embed)
 
 
@@ -570,7 +570,7 @@ async def ticketsetup(ctx):
         color=discord.Color.blurple(),
         timestamp=discord.utils.utcnow()
     )
-    embed.set_footer(text="Faisal Mod • Support System")
+    embed.set_footer(text="Supreme • Support System")
 
     await ctx.send(embed=embed, view=TicketSetupView())
 
@@ -850,7 +850,7 @@ async def staffsettings(ctx):
     ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else "Not configured (`>ranks add @role`)"
 
     embed = discord.Embed(
-        title=f"{EMOJIS['gear']} Faisal Mod • Server Settings",
+        title=f"{EMOJIS['gear']} Supreme • Server Settings",
         color=discord.Color.blurple(),
         timestamp=discord.utils.utcnow()
     )
@@ -891,7 +891,7 @@ async def staffsettings(ctx):
 
 @bot.command(name="help")
 async def help_command(ctx):
-    embed = discord.Embed(title=f"{EMOJIS['gear']} Faisal Mod • Command Center", description="Here are all available command modules:", color=discord.Color.blurple())
+    embed = discord.Embed(title=f"{EMOJIS['gear']} Supreme • Command Center", description="Here are all available command modules:", color=discord.Color.blurple())
     embed.add_field(name=f"{EMOJIS['shield']} Staff & Management", value="`>promo`, `>demo`, `>super`, `>superintro`, `>staffintro`, `>staff`, `>role`, `>steal`", inline=False)
     embed.add_field(name=f"{EMOJIS['warning']} Moderation", value="`>kick`, `>ban`, `>clear`, `>mute`", inline=False)
     embed.add_field(name=f"{EMOJIS['ticket']} Support & Tickets", value="`>ticketsetup`", inline=False)
@@ -909,7 +909,7 @@ async def help_command(ctx):
 async def on_ready():
     bot.add_view(TicketSetupView())
     bot.add_view(TicketCloseView())
-    logging.info("Faisal Mod logged in as %s", bot.user)
+    logging.info("Supreme logged in as %s", bot.user)
 
 
 @bot.event
@@ -932,3 +932,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+

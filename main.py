@@ -130,7 +130,9 @@ config = {
     "audit_channels": {},
     "rank_ladders": {},
     "staff_limits": {},
-    "economy": {}
+    "economy": {},
+    "extra_owners": {},
+    "activity": {}
 }
 
 
@@ -179,7 +181,8 @@ def guild_setting(setting, guild_id):
 # =========================
 
 def user_is_owner(ctx):
-    return ctx.author.id == OWNER_ID or ctx.author.id == ctx.guild.owner_id
+    extra_ids = config.get("extra_owners", {}).get(str(ctx.guild.id), [])
+    return ctx.author.id == OWNER_ID or ctx.author.id == ctx.guild.owner_id or str(ctx.author.id) in {str(uid) for uid in extra_ids}
 
 
 def user_is_supervisor(ctx):
@@ -1103,6 +1106,87 @@ async def staffsettings(ctx):
 # HELP COMMAND
 # =========================
 
+# =========================
+# EXTRA OWNER & BOT ACTIVITY COMMANDS
+# =========================
+
+@bot.command(name="addextraowner")
+@commands.guild_only()
+async def addextraowner(ctx, member: discord.Member):
+    """Give a member owner-level bot permissions in this server."""
+    if not (ctx.author.id == OWNER_ID or ctx.author.id == ctx.guild.owner_id):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can add extra owners.", color=discord.Color.red()))
+        return
+    if member.bot:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Bots cannot be added as extra owners.", color=discord.Color.orange()))
+        return
+    owners = config.setdefault("extra_owners", {}).setdefault(str(ctx.guild.id), [])
+    if str(member.id) in {str(uid) for uid in owners}:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {member.mention} is already an extra owner.", color=discord.Color.orange()))
+        return
+    owners.append(str(member.id))
+    save_config()
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Added {member.mention} as an extra owner for this server.", color=discord.Color.green()))
+
+
+@bot.command(name="removextraowner", aliases=["removeextraowner"])
+@commands.guild_only()
+async def removextraowner(ctx, member: discord.Member):
+    """Remove a member's owner-level bot permissions in this server."""
+    if not (ctx.author.id == OWNER_ID or ctx.author.id == ctx.guild.owner_id):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can remove extra owners.", color=discord.Color.red()))
+        return
+    owners = config.setdefault("extra_owners", {}).setdefault(str(ctx.guild.id), [])
+    if str(member.id) not in {str(uid) for uid in owners}:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {member.mention} is not an extra owner.", color=discord.Color.orange()))
+        return
+    config["extra_owners"][str(ctx.guild.id)] = [str(uid) for uid in owners if str(uid) != str(member.id)]
+    save_config()
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Removed {member.mention} from the extra owners.", color=discord.Color.green()))
+
+
+ACTIVITY_TYPES = {
+    "playing": discord.ActivityType.playing,
+    "listening": discord.ActivityType.listening,
+    "watching": discord.ActivityType.watching,
+    "competing": discord.ActivityType.competing,
+    "streaming": discord.ActivityType.streaming,
+}
+
+
+async def apply_bot_activity(activity_type, text):
+    if activity_type == "playing":
+        activity = discord.Game(name=text)
+    elif activity_type == "streaming":
+        activity = discord.Streaming(name=text, url="https://www.twitch.tv/")
+    else:
+        activity = discord.Activity(type=ACTIVITY_TYPES[activity_type], name=text)
+    await bot.change_presence(activity=activity, status=discord.Status.online)
+
+
+@bot.command(name="setactivity")
+@commands.guild_only()
+async def setactivity(ctx, activity: str, *, text: str):
+    """Set the bot's global status, for example >setactivity playing Supreme Bot."""
+    if not user_is_owner(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to change the bot activity.", color=discord.Color.red()))
+        return
+    activity = activity.lower()
+    if activity not in ACTIVITY_TYPES:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Activity must be playing, streaming, listening, watching, or competing.", color=discord.Color.orange()))
+        return
+    text = text.strip()
+    if not text or len(text) > 128:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Activity text must be between 1 and 128 characters.", color=discord.Color.orange()))
+        return
+    try:
+        await apply_bot_activity(activity, text)
+        config["activity"] = {"type": activity, "text": text}
+        save_config()
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Bot activity set to **{activity.title()} {text}**.", color=discord.Color.green()))
+    except discord.HTTPException as exc:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Discord couldn't update that activity: `{exc}`", color=discord.Color.red()))
+
 @bot.command(name="help")
 async def help_command(ctx):
     embed = discord.Embed(title=f"{EMOJIS['gear']} Supreme • Command Center", description="Here are all available command modules:", color=discord.Color.blurple())
@@ -1113,7 +1197,7 @@ async def help_command(ctx):
     embed.add_field(name=f"{EMOJIS['ticket']} Support & Tickets", value="`>ticketsetup`", inline=False)
     embed.add_field(name=f"{EMOJIS['user']} Utility & Info", value="`>ping`, `>serverinfo`, `>userinfo`, `>avatar`", inline=False)
     embed.add_field(name=f"{EMOJIS['success']} Fun & Games", value="`>coinflip`, `>roll`", inline=False)
-    embed.add_field(name=f"{EMOJIS['gear']} Setup", value="`>ranks add @role`, `>ranks clear`, `>setstaffsupervisor`, `>setpromodemo`, `>setaudit`, `>staffsettings`", inline=False)
+    embed.add_field(name=f"{EMOJIS['gear']} Setup", value="`>ranks add @role`, `>ranks clear`, `>setstaffsupervisor`, `>setpromodemo`, `>setaudit`, `>staffsettings`, `>addextraowner @member`, `>removextraowner @member`, `>setactivity <playing|streaming|listening|watching|competing> <text>`", inline=False)
     await ctx.reply(embed=embed, mention_author=False)
 
 
@@ -1126,6 +1210,9 @@ async def on_ready():
     bot.add_view(TicketSetupView())
     bot.add_view(TicketCloseView())
     await install_application_emojis()
+    activity_settings = config.get("activity", {})
+    if activity_settings.get("type") in ACTIVITY_TYPES and activity_settings.get("text"):
+        await apply_bot_activity(activity_settings["type"], activity_settings["text"])
     logging.info("Supreme logged in as %s", bot.user)
 
 
@@ -1149,6 +1236,11 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+
+
+
 
 
 

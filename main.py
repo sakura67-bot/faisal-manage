@@ -2529,84 +2529,113 @@ async def setactivity(ctx, activity: str, *, text: str):
     except discord.HTTPException as exc:
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Discord couldn't update that activity: `{exc}`", color=discord.Color.red()))
 
-AI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-AI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
+import os
+import aiohttp
+import asyncio
+import time
+import discord
+
+# =========================
+# HUGGING FACE AI CONFIG
+# =========================
+
+HF_API_KEY = os.getenv("HUGGINGFACE_API_KEY", "").strip()
+# Using a powerful, free-tier accessible instruction model via Hugging Face router
+HF_MODEL = os.getenv("HUGGINGFACE_MODEL", "meta-llama/Llama-3.3-70B-Instruct").strip()
 AI_HISTORY = {}
 AI_LAST_REQUEST = {}
 
-
 async def call_ai(guild_id, user_id, prompt):
-    """Send a bounded per-member conversation to the OpenAI Responses API."""
-    if not AI_API_KEY:
-        raise RuntimeError("AI is not configured yet. Set OPENAI_API_KEY in the hosting environment.")
+    """Send a conversation request to Hugging Face's serverless Inference API."""
+    if not HF_API_KEY:
+        raise RuntimeError("AI is not configured yet. Set HUGGINGFACE_API_KEY in the hosting environment.")
+    
     history_key = (int(guild_id), int(user_id))
-    history = AI_HISTORY.get(history_key, [])[-8:]
-    messages = [{"role": "user", "content": prompt}]
-    # Responses accepts a list of role/content input messages; keep only this user's history.
-    messages = history + messages
+    history = AI_HISTORY.get(history_key, [])[-6:]  # Keep last 6 turns for context
+    
+    # Format messages for Llama/OpenAI-compatible chat completions endpoint on Hugging Face
+    messages = [
+        {"role": "system", "content": "You are Supreme Bot AI, a friendly, helpful AI assistant chatting in a Discord server. Keep responses structured, concise, and easy to read. Use code blocks for code snippets."}
+    ]
+    for turn in history:
+        messages.append(turn)
+    messages.append({"role": "user", "content": prompt})
+
     payload = {
-        "model": AI_MODEL,
-        "instructions": "You are Supreme Bot AI, a friendly, capable assistant chatting in a Discord server. Answer like a helpful ChatGPT-style assistant. Help with coding and explain examples clearly; for Roblox Studio, use correct Luau and give practical steps. You cannot actually perform server actions, access private data, or create reminders. Never claim to have done an action unless a bot command did it. Keep replies clear and use code fences for code.",
-        "input": messages,
-        "max_output_tokens": 500,
-        "store": False
+        "model": HF_MODEL,
+        "messages": messages,
+        "max_tokens": 500,
+        "temperature": 0.7
     }
-    timeout = aiohttp.ClientTimeout(total=75)
+
+    headers = {
+        "Authorization": f"Bearer {HF_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    timeout = aiohttp.ClientTimeout(total=45)
     async with aiohttp.ClientSession(timeout=timeout) as session:
         async with session.post(
-            "https://api.openai.com/v1/responses",
-            headers={"Authorization": f"Bearer {AI_API_KEY}", "Content-Type": "application/json"},
+            "https://router.huggingface.co/v1/chat/completions",
+            headers=headers,
             json=payload
         ) as response:
             if response.status >= 400:
                 body = await response.text()
-                logging.warning("AI API returned HTTP %s: %s", response.status, body[:500])
                 if response.status == 401:
-                    raise RuntimeError("The AI API key was rejected. Check OPENAI_API_KEY in your hosting secrets.")
+                    raise RuntimeError("The Hugging Face token was rejected. Check your HUGGINGFACE_API_KEY secret.")
                 if response.status == 429:
-                    raise RuntimeError("The AI service is busy or the API quota is unavailable. Try again later.")
+                    raise RuntimeError("The Hugging Face rate limit was reached or model is loading. Try again shortly.")
                 raise RuntimeError("The AI service returned an error. Try again later.")
+            
             data = await response.json()
 
-    answer_parts = []
-    for output in data.get("output", []):
-        for content in output.get("content", []):
-            if content.get("type") == "output_text" and content.get("text"):
-                answer_parts.append(content["text"])
-    answer = "\n".join(answer_parts).strip()
+    try:
+        answer = data["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError):
+        raise RuntimeError("The AI returned an unexpected response format. Please try again.")
+
     if not answer:
         raise RuntimeError("The AI returned an empty reply. Please try again.")
-    AI_HISTORY[history_key] = (history + [
+
+    # Update history
+    AI_HISTORY[history_key] = history + [
         {"role": "user", "content": prompt},
         {"role": "assistant", "content": answer}
-    ])[-10:]
+    ]
+    
     return answer
 
+# =========================
+# COMMANDS
+# =========================
 
 @bot.command(name="ask", aliases=["ai", "chat"])
 @commands.guild_only()
 async def ask_ai(ctx, *, prompt: str):
-    """Chat with Supreme Bot AI. Conversation memory is private to your account and server."""
+    """Chat with Supreme Bot AI using Hugging Face."""
     prompt = prompt.strip()
     if not prompt:
-        return await ctx.reply("Ask me something after the command, for example: `>ask explain photosynthesis`", mention_author=False)
+        return await ctx.reply("Ask me something after the command, for example: `>ask explain how a computer works`", mention_author=False)
     if len(prompt) > 2000:
         return await ctx.reply("Please keep each message under 2,000 characters.", mention_author=False)
+    
     key = (ctx.guild.id, ctx.author.id)
     now = time.monotonic()
-    wait = 5 - (now - AI_LAST_REQUEST.get(key, 0))
+    wait = 4 - (now - AI_LAST_REQUEST.get(key, 0))
     if wait > 0:
         return await ctx.reply(f"Give me {wait:.1f} seconds before your next AI message.", mention_author=False)
     AI_LAST_REQUEST[key] = now
+
     async with ctx.typing():
         try:
             answer = await call_ai(ctx.guild.id, ctx.author.id, prompt)
         except (aiohttp.ClientError, asyncio.TimeoutError):
-            logging.exception("AI request failed")
-            return await ctx.reply("I couldn't reach the AI service. Try again in a moment.", mention_author=False)
+            return await ctx.reply("I couldn't reach the Hugging Face AI service. Try again in a moment.", mention_author=False)
         except RuntimeError as exc:
             return await ctx.reply(str(exc), mention_author=False)
-    # Discord messages are limited to 2,000 characters.
+
+    # Chunk long responses to fit Discord's 2,000 character limit
     for start in range(0, len(answer), 1900):
         await ctx.reply(answer[start:start + 1900], mention_author=False, allowed_mentions=discord.AllowedMentions.none())
 
@@ -2614,126 +2643,10 @@ async def ask_ai(ctx, *, prompt: str):
 @bot.command(name="clearai", aliases=["resetai"])
 @commands.guild_only()
 async def clear_ai_history(ctx):
-    """Clear your own AI conversation memory in this server."""
+    """Clear your Hugging Face AI conversation memory in this server."""
     AI_HISTORY.pop((ctx.guild.id, ctx.author.id), None)
-    await ctx.reply("Your Supreme Bot AI chat history has been cleared.", mention_author=False)
-
-
-@bot.command(name="setaichannel", aliases=["ai-channel"])
-@commands.guild_only()
-async def set_ai_channel(ctx, channel: str):
-    """Set the channel where members can chat with Supreme Bot AI without a prefix. Use off to disable."""
-    if not (user_is_supervisor(ctx) or ctx.author.guild_permissions.manage_guild):
-        return await ctx.reply("You need Manage Server permission or owner/supervisor access to set the AI chat channel.", mention_author=False)
-    guild_id = str(ctx.guild.id)
-    current = config.setdefault("ai_channels", {}).get(guild_id)
-    if channel.lower() == "off":
-        config["ai_channels"].pop(guild_id, None)
-        if not save_config():
-            if current is not None:
-                config["ai_channels"][guild_id] = current
-            return await ctx.reply("I couldn't save the AI channel setting. Please try again.", mention_author=False)
-        return await ctx.reply("AI chat channel disabled for this server.", mention_author=False)
-    try:
-        destination = await commands.TextChannelConverter().convert(ctx, channel)
-    except commands.ChannelNotFound:
-        return await ctx.reply("I couldn't find that text channel. Mention it, for example `>setaichannel #ai-chat`, or use `>setaichannel off`.", mention_author=False)
-    if destination.guild.id != ctx.guild.id:
-        return await ctx.reply("Choose a text channel from this server.", mention_author=False)
-    config["ai_channels"][guild_id] = str(destination.id)
-    if not save_config():
-        if current is None:
-            config["ai_channels"].pop(guild_id, None)
-        else:
-            config["ai_channels"][guild_id] = current
-        return await ctx.reply("I couldn't save the AI channel setting. Please try again.", mention_author=False)
-    await ctx.reply(f"AI chat is enabled in {destination.mention}. Members can chat there without a prefix. Use `>setaichannel off` to disable it.", mention_author=False)
-
-
-def get_guild_tasks(guild_id):
-    tasks = config.setdefault("ai_tasks", {}).setdefault(str(guild_id), [])
-    if not isinstance(tasks, list):
-        tasks = []
-        config["ai_tasks"][str(guild_id)] = tasks
-    return tasks
-
-
-def next_task_id(tasks):
-    used = {str(task.get("id")) for task in tasks}
-    while True:
-        task_id = secrets.token_hex(3)
-        if task_id not in used:
-            return task_id
-
-
-@bot.command(name="task")
-@commands.guild_only()
-async def create_task(ctx, *, description: str):
-    """Add a task to your own task list."""
-    description = description.strip()
-    if not description or len(description) > 500:
-        return await ctx.reply("Task descriptions must be between 1 and 500 characters.", mention_author=False)
-    tasks = get_guild_tasks(ctx.guild.id)
-    task = {"id": next_task_id(tasks), "assigned_to": str(ctx.author.id), "assigned_by": str(ctx.author.id), "description": description, "created_at": int(time.time()), "done": False}
-    tasks.append(task)
-    if not save_config():
-        tasks.remove(task)
-        return await ctx.reply("I couldn't save that task. Please try again.", mention_author=False)
-    await ctx.reply(f"✅ Added task `{task['id']}` to your list: **{description}**", mention_author=False)
-
-
-@bot.command(name="assign")
-@commands.guild_only()
-async def assign_task(ctx, member: discord.Member, *, description: str):
-    """Assign a task to a member. Server supervisors only."""
-    if not user_is_supervisor(ctx):
-        return await ctx.reply("Only server supervisors can assign tasks to other members.", mention_author=False)
-    description = description.strip()
-    if member.bot or not description or len(description) > 500:
-        return await ctx.reply("Choose a human member and a task description under 500 characters.", mention_author=False)
-    tasks = get_guild_tasks(ctx.guild.id)
-    task = {"id": next_task_id(tasks), "assigned_to": str(member.id), "assigned_by": str(ctx.author.id), "description": description, "created_at": int(time.time()), "done": False}
-    tasks.append(task)
-    if not save_config():
-        tasks.remove(task)
-        return await ctx.reply("I couldn't save that task. Please try again.", mention_author=False)
-    await ctx.reply(f"📌 Assigned task `{task['id']}` to {member.mention}: **{description}**", mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-
-
-@bot.command(name="tasks", aliases=["mytasks"])
-@commands.guild_only()
-async def list_tasks(ctx, member: discord.Member = None):
-    """Show your tasks, or another member's tasks if you are a supervisor."""
-    target = member or ctx.author
-    if member and member.id != ctx.author.id and not user_is_supervisor(ctx):
-        return await ctx.reply("Only server supervisors can view another member's task list.", mention_author=False)
-    tasks = [task for task in get_guild_tasks(ctx.guild.id) if str(task.get("assigned_to")) == str(target.id) and not task.get("done", False)]
-    if not tasks:
-        return await ctx.reply(f"{target.display_name} has no open tasks.", mention_author=False)
-    lines = [f"`{task.get('id', '?')}` • {task.get('description', '(no description)')}" for task in tasks[-20:]]
-    embed = discord.Embed(title=f"📋 {target.display_name}'s open tasks", description="\n".join(lines), color=discord.Color.blurple())
-    await ctx.reply(embed=embed, mention_author=False)
-
-
-@bot.command(name="done", aliases=["taskdone"])
-@commands.guild_only()
-async def complete_task(ctx, task_id: str):
-    """Mark one of your tasks complete. Supervisors can complete any task."""
-    tasks = get_guild_tasks(ctx.guild.id)
-    task = next((item for item in tasks if str(item.get("id", "")).lower() == task_id.lower()), None)
-    if task is None:
-        return await ctx.reply("I couldn't find that task ID. Use `>tasks` to see your open tasks.", mention_author=False)
-    if str(task.get("assigned_to")) != str(ctx.author.id) and not user_is_supervisor(ctx):
-        return await ctx.reply("You can only complete tasks assigned to you.", mention_author=False)
-    task["done"] = True
-    task["completed_at"] = int(time.time())
-    if not save_config():
-        task["done"] = False
-        task.pop("completed_at", None)
-        return await ctx.reply("I couldn't save that task update. Please try again.", mention_author=False)
-    await ctx.reply(f"✅ Task `{task_id}` marked complete.", mention_author=False)
-
-
+    await ctx.reply("Your AI chat history has been cleared.", mention_author=False)
+    
 @bot.command(name="help")
 async def help_command(ctx):
     prefix = get_server_prefix(ctx.guild.id if ctx.guild else None)
@@ -3010,125 +2923,6 @@ async def prank_nuke(ctx):
     
     # Send the prank reveal as its own separate message
     await ctx.send(embed=prank_embed)
-
-import os
-import aiohttp
-import asyncio
-import time
-import discord
-
-# =========================
-# HUGGING FACE AI CONFIG
-# =========================
-
-HF_API_KEY = os.getenv("HUGGINGFACE_API_KEY", "").strip()
-# Using a powerful, free-tier accessible instruction model via Hugging Face router
-HF_MODEL = os.getenv("HUGGINGFACE_MODEL", "meta-llama/Llama-3.3-70B-Instruct").strip()
-AI_HISTORY = {}
-AI_LAST_REQUEST = {}
-
-async def call_ai(guild_id, user_id, prompt):
-    """Send a conversation request to Hugging Face's serverless Inference API."""
-    if not HF_API_KEY:
-        raise RuntimeError("AI is not configured yet. Set HUGGINGFACE_API_KEY in the hosting environment.")
-    
-    history_key = (int(guild_id), int(user_id))
-    history = AI_HISTORY.get(history_key, [])[-6:]  # Keep last 6 turns for context
-    
-    # Format messages for Llama/OpenAI-compatible chat completions endpoint on Hugging Face
-    messages = [
-        {"role": "system", "content": "You are Supreme Bot AI, a friendly, helpful AI assistant chatting in a Discord server. Keep responses structured, concise, and easy to read. Use code blocks for code snippets."}
-    ]
-    for turn in history:
-        messages.append(turn)
-    messages.append({"role": "user", "content": prompt})
-
-    payload = {
-        "model": HF_MODEL,
-        "messages": messages,
-        "max_tokens": 500,
-        "temperature": 0.7
-    }
-
-    headers = {
-        "Authorization": f"Bearer {HF_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    timeout = aiohttp.ClientTimeout(total=45)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(
-            "https://router.huggingface.co/v1/chat/completions",
-            headers=headers,
-            json=payload
-        ) as response:
-            if response.status >= 400:
-                body = await response.text()
-                if response.status == 401:
-                    raise RuntimeError("The Hugging Face token was rejected. Check your HUGGINGFACE_API_KEY secret.")
-                if response.status == 429:
-                    raise RuntimeError("The Hugging Face rate limit was reached or model is loading. Try again shortly.")
-                raise RuntimeError("The AI service returned an error. Try again later.")
-            
-            data = await response.json()
-
-    try:
-        answer = data["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError):
-        raise RuntimeError("The AI returned an unexpected response format. Please try again.")
-
-    if not answer:
-        raise RuntimeError("The AI returned an empty reply. Please try again.")
-
-    # Update history
-    AI_HISTORY[history_key] = history + [
-        {"role": "user", "content": prompt},
-        {"role": "assistant", "content": answer}
-    ]
-    
-    return answer
-
-# =========================
-# COMMANDS
-# =========================
-
-@bot.command(name="ask", aliases=["ai", "chat"])
-@commands.guild_only()
-async def ask_ai(ctx, *, prompt: str):
-    """Chat with Supreme Bot AI using Hugging Face."""
-    prompt = prompt.strip()
-    if not prompt:
-        return await ctx.reply("Ask me something after the command, for example: `>ask explain how a computer works`", mention_author=False)
-    if len(prompt) > 2000:
-        return await ctx.reply("Please keep each message under 2,000 characters.", mention_author=False)
-    
-    key = (ctx.guild.id, ctx.author.id)
-    now = time.monotonic()
-    wait = 4 - (now - AI_LAST_REQUEST.get(key, 0))
-    if wait > 0:
-        return await ctx.reply(f"Give me {wait:.1f} seconds before your next AI message.", mention_author=False)
-    AI_LAST_REQUEST[key] = now
-
-    async with ctx.typing():
-        try:
-            answer = await call_ai(ctx.guild.id, ctx.author.id, prompt)
-        except (aiohttp.ClientError, asyncio.TimeoutError):
-            return await ctx.reply("I couldn't reach the Hugging Face AI service. Try again in a moment.", mention_author=False)
-        except RuntimeError as exc:
-            return await ctx.reply(str(exc), mention_author=False)
-
-    # Chunk long responses to fit Discord's 2,000 character limit
-    for start in range(0, len(answer), 1900):
-        await ctx.reply(answer[start:start + 1900], mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-
-
-@bot.command(name="clearai", aliases=["resetai"])
-@commands.guild_only()
-async def clear_ai_history(ctx):
-    """Clear your Hugging Face AI conversation memory in this server."""
-    AI_HISTORY.pop((ctx.guild.id, ctx.author.id), None)
-    await ctx.reply("Your AI chat history has been cleared.", mention_author=False)
-
 
 # =========================
 # EVENTS & STARTUP

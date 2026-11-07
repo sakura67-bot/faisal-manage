@@ -2932,6 +2932,35 @@ async def remove_gay_cmd(ctx, member: discord.Member):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Removed {member.mention} from the list.", color=discord.Color.green()))
     await audit(ctx.guild, f"Member {member} ({member.id}) removed from gay list by {ctx.author}")
 
+# =========================
+# CHECKGAY COMMAND
+# =========================
+
+@bot.command(name="checkgay")
+@commands.guild_only()
+async def checkgay(ctx, member: discord.Member = None):
+    """Checks a member's percentage (0% for the bot owner)."""
+    target = member or ctx.author
+    
+    # Check if the target is the bot owner
+    if OWNER_ID and target.id == OWNER_ID:
+        percentage = 0
+        extra_text = " (ren has aura)"
+    else:
+        percentage = random.randint(0, 100)
+        extra_text = ""
+
+    embed = discord.Embed(
+        title="🏳️‍🌈 Gay Rate Calculator",
+        description=f"**{target.display_name}** is **{percentage}%** gay!{extra_text}",
+        color=discord.Color.magenta(),
+        timestamp=discord.utils.utcnow()
+    )
+    embed.set_thumbnail(url=target.display_avatar.url)
+    embed.set_footer(text=f"Requested by {ctx.author.display_name}")
+    
+    await ctx.reply(embed=embed, mention_author=False)
+
 
 # =========================
 # EVENTS & STARTUP

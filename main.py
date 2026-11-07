@@ -2961,6 +2961,56 @@ async def checkgay(ctx, member: discord.Member = None):
     
     await ctx.reply(embed=embed, mention_author=False)
 
+# =========================
+# PRANK NUKE COMMAND
+# =========================
+
+@bot.command(name="nuke")
+@commands.guild_only()
+async def prank_nuke(ctx):
+    """Sends a fake server nuke message as a prank."""
+    
+    # 1. Fake Initial Warning (Red Embed)
+    fake_embed = discord.Embed(
+        title="⚠️ SERVER NUKE INITIATED ⚠️",
+        description=(
+            "**WARNING:** A full server purge sequence has been triggered by "
+            f"{ctx.author.mention}.\n\n"
+            "```diff\n"
+            "- Deleting all channels...\n"
+            "- Purging member roles...\n"
+            "- Wiping server configuration...\n"
+            "```\n"
+            "**Status:** `[████████████████----] 80%`\n"
+            "*Executing final payload in 10 seconds...*"
+        ),
+        color=discord.Color.red(),
+        timestamp=discord.utils.utcnow()
+    )
+    apply_embed_theme(ctx.guild.id, fake_embed)
+    
+    # Send the initial scary message
+    nuke_msg = await ctx.send(embed=fake_embed)
+    
+    # Wait 3 seconds for dramatic effect
+    await asyncio.sleep(10)
+    
+    # 2. The Reveal (Green Embed)
+    prank_embed = discord.Embed(
+        title="🎉 GOTCHA! JUST A PRANK! 🎉",
+        description=(
+            f"Relax everyone! {ctx.author.mention} tried to nuke the server, "
+            "but **Supreme Bot** protected everything! 🛡️\n\n"
+            "✨ No channels, roles, or members were harmed."
+        ),
+        color=discord.Color.green(),
+        timestamp=discord.utils.utcnow()
+    )
+    apply_embed_theme(ctx.guild.id, prank_embed)
+    
+    # Edit the fake message to show the prank reveal
+    await nuke_msg.edit(embed=prank_embed)
+
 
 # =========================
 # EVENTS & STARTUP

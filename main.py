@@ -2968,7 +2968,7 @@ async def checkgay(ctx, member: discord.Member = None):
 @bot.command(name="nuke")
 @commands.guild_only()
 async def prank_nuke(ctx):
-    """Sends a fake server nuke message as a prank."""
+    """Sends a fake server nuke warning followed by a separate prank message."""
     
     # 1. Fake Initial Warning (Red Embed)
     fake_embed = discord.Embed(
@@ -2981,7 +2981,7 @@ async def prank_nuke(ctx):
             "- Purging member roles...\n"
             "- Wiping server configuration...\n"
             "```\n"
-            "**Status:** `[████████████████----] 80%`\n"
+            "**Status:** `[████████████████----] 30%`\n"
             "*Executing final payload in 10 seconds...*"
         ),
         color=discord.Color.red(),
@@ -2989,13 +2989,13 @@ async def prank_nuke(ctx):
     )
     apply_embed_theme(ctx.guild.id, fake_embed)
     
-    # Send the initial scary message
-    nuke_msg = await ctx.send(embed=fake_embed)
+    # Send the scary message first
+    await ctx.send(embed=fake_embed)
     
     # Wait 3 seconds for dramatic effect
     await asyncio.sleep(10)
     
-    # 2. The Reveal (Green Embed)
+    # 2. The Reveal (Green Embed sent as a NEW message)
     prank_embed = discord.Embed(
         title="🎉 GOTCHA! JUST A PRANK! 🎉",
         description=(
@@ -3008,9 +3008,8 @@ async def prank_nuke(ctx):
     )
     apply_embed_theme(ctx.guild.id, prank_embed)
     
-    # Edit the fake message to show the prank reveal
-    await nuke_msg.edit(embed=prank_embed)
-
+    # Send the prank reveal as its own separate message
+    await ctx.send(embed=prank_embed)
 
 # =========================
 # EVENTS & STARTUP

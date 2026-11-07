@@ -2853,6 +2853,85 @@ async def dashboard(ctx):
     embed.set_footer(text="Sign in with Discord to continue")
     await ctx.reply(embed=embed, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
 
+# =========================
+# GAY LIST COMMANDS
+# =========================
+
+def get_gay_list(guild_id):
+    """Retrieves or initializes the gay list for a specific guild."""
+    if "gay_list" not in config:
+        config["gay_list"] = {}
+    return config["gay_list"].setdefault(str(guild_id), [])
+
+@bot.command(name="gay")
+@commands.guild_only()
+async def gay_list_cmd(ctx):
+    """Shows the list of added members."""
+    guild_id = str(ctx.guild.id)
+    members_list = get_gay_list(guild_id)
+    
+    if not members_list:
+        await ctx.reply(embed=discord.Embed(description="🏳️‍🌈 The list is currently empty. Use `>addgay @member` to add someone.", color=discord.Color.blurple()))
+        return
+        
+    mentions = [f"<@&{uid}>" if not str(uid).isdigit() else f"<@{uid}>" for uid in members_list]
+    # Let's ensure they are formatted nicely as member mentions:
+    formatted_mentions = []
+    for uid in members_list:
+        member = ctx.guild.get_member(int(uid))
+        formatted_mentions.append(member.mention if member else f"`ID: {uid}`")
+
+    embed = discord.Embed(
+        title="🏳️‍🌈 Gay List (also known as bart list)",
+        description="\n".join(formatted_mentions),
+        color=discord.Color.magenta(),
+        timestamp=discord.utils.utcnow()
+    )
+    embed.set_footer(text=f"Requested by {ctx.author.display_name}")
+    await ctx.reply(embed=embed, mention_author=False)
+
+@bot.command(name="addgay")
+@commands.guild_only()
+async def add_gay_cmd(ctx, member: discord.Member):
+    """Adds a member to the list (Supervisor/Owner only)."""
+    if not user_is_supervisor(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
+        return
+
+    guild_id = str(ctx.guild.id)
+    members_list = get_gay_list(guild_id)
+    
+    if str(member.id) in members_list:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {member.mention} is already on the list!", color=discord.Color.orange()))
+        return
+
+    members_list.append(str(member.id))
+    save_config()
+    
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Added {member.mention} to the list!", color=discord.Color.green()))
+    await audit(ctx.guild, f"Member {member} ({member.id}) added to gay list by {ctx.author}")
+
+@bot.command(name="removegay")
+@commands.guild_only()
+async def remove_gay_cmd(ctx, member: discord.Member):
+    """Removes a member from the list (Supervisor/Owner only)."""
+    if not user_is_supervisor(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
+        return
+
+    guild_id = str(ctx.guild.id)
+    members_list = get_gay_list(guild_id)
+    
+    if str(member.id) not in members_list:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {member.mention} is not on the list.", color=discord.Color.orange()))
+        return
+
+    members_list.remove(str(member.id))
+    save_config()
+    
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Removed {member.mention} from the list.", color=discord.Color.green()))
+    await audit(ctx.guild, f"Member {member} ({member.id}) removed from gay list by {ctx.author}")
+
 
 # =========================
 # EVENTS & STARTUP

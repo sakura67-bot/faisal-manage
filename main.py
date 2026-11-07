@@ -3011,6 +3011,125 @@ async def prank_nuke(ctx):
     # Send the prank reveal as its own separate message
     await ctx.send(embed=prank_embed)
 
+import os
+import aiohttp
+import asyncio
+import time
+import discord
+
+# =========================
+# HUGGING FACE AI CONFIG
+# =========================
+
+HF_API_KEY = os.getenv("HUGGINGFACE_API_KEY", "").strip()
+# Using a powerful, free-tier accessible instruction model via Hugging Face router
+HF_MODEL = os.getenv("HUGGINGFACE_MODEL", "meta-llama/Llama-3.3-70B-Instruct").strip()
+AI_HISTORY = {}
+AI_LAST_REQUEST = {}
+
+async def call_ai(guild_id, user_id, prompt):
+    """Send a conversation request to Hugging Face's serverless Inference API."""
+    if not HF_API_KEY:
+        raise RuntimeError("AI is not configured yet. Set HUGGINGFACE_API_KEY in the hosting environment.")
+    
+    history_key = (int(guild_id), int(user_id))
+    history = AI_HISTORY.get(history_key, [])[-6:]  # Keep last 6 turns for context
+    
+    # Format messages for Llama/OpenAI-compatible chat completions endpoint on Hugging Face
+    messages = [
+        {"role": "system", "content": "You are Supreme Bot AI, a friendly, helpful AI assistant chatting in a Discord server. Keep responses structured, concise, and easy to read. Use code blocks for code snippets."}
+    ]
+    for turn in history:
+        messages.append(turn)
+    messages.append({"role": "user", "content": prompt})
+
+    payload = {
+        "model": HF_MODEL,
+        "messages": messages,
+        "max_tokens": 500,
+        "temperature": 0.7
+    }
+
+    headers = {
+        "Authorization": f"Bearer {HF_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    timeout = aiohttp.ClientTimeout(total=45)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(
+            "https://router.huggingface.co/v1/chat/completions",
+            headers=headers,
+            json=payload
+        ) as response:
+            if response.status >= 400:
+                body = await response.text()
+                if response.status == 401:
+                    raise RuntimeError("The Hugging Face token was rejected. Check your HUGGINGFACE_API_KEY secret.")
+                if response.status == 429:
+                    raise RuntimeError("The Hugging Face rate limit was reached or model is loading. Try again shortly.")
+                raise RuntimeError("The AI service returned an error. Try again later.")
+            
+            data = await response.json()
+
+    try:
+        answer = data["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError):
+        raise RuntimeError("The AI returned an unexpected response format. Please try again.")
+
+    if not answer:
+        raise RuntimeError("The AI returned an empty reply. Please try again.")
+
+    # Update history
+    AI_HISTORY[history_key] = history + [
+        {"role": "user", "content": prompt},
+        {"role": "assistant", "content": answer}
+    ]
+    
+    return answer
+
+# =========================
+# COMMANDS
+# =========================
+
+@bot.command(name="ask", aliases=["ai", "chat"])
+@commands.guild_only()
+async def ask_ai(ctx, *, prompt: str):
+    """Chat with Supreme Bot AI using Hugging Face."""
+    prompt = prompt.strip()
+    if not prompt:
+        return await ctx.reply("Ask me something after the command, for example: `>ask explain how a computer works`", mention_author=False)
+    if len(prompt) > 2000:
+        return await ctx.reply("Please keep each message under 2,000 characters.", mention_author=False)
+    
+    key = (ctx.guild.id, ctx.author.id)
+    now = time.monotonic()
+    wait = 4 - (now - AI_LAST_REQUEST.get(key, 0))
+    if wait > 0:
+        return await ctx.reply(f"Give me {wait:.1f} seconds before your next AI message.", mention_author=False)
+    AI_LAST_REQUEST[key] = now
+
+    async with ctx.typing():
+        try:
+            answer = await call_ai(ctx.guild.id, ctx.author.id, prompt)
+        except (aiohttp.ClientError, asyncio.TimeoutError):
+            return await ctx.reply("I couldn't reach the Hugging Face AI service. Try again in a moment.", mention_author=False)
+        except RuntimeError as exc:
+            return await ctx.reply(str(exc), mention_author=False)
+
+    # Chunk long responses to fit Discord's 2,000 character limit
+    for start in range(0, len(answer), 1900):
+        await ctx.reply(answer[start:start + 1900], mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+
+
+@bot.command(name="clearai", aliases=["resetai"])
+@commands.guild_only()
+async def clear_ai_history(ctx):
+    """Clear your Hugging Face AI conversation memory in this server."""
+    AI_HISTORY.pop((ctx.guild.id, ctx.author.id), None)
+    await ctx.reply("Your AI chat history has been cleared.", mention_author=False)
+
+
 # =========================
 # EVENTS & STARTUP
 # =========================

@@ -107,8 +107,6 @@ def web_user_can_manage(session, guild_id):
         return False
     extra_owner = str(session["user"]["id"]) in {str(uid) for uid in config.get("extra_owners", {}).get(str(guild_id), [])}
     bot_owner = int(OWNER_ID) > 0 and str(session["user"]["id"]) == str(OWNER_ID)
-    # Discord server permissions do not grant dashboard access. Only the bot owner
-    # and explicitly trusted extra owners can administer it.
     return bot_owner or extra_owner
 
 
@@ -306,7 +304,6 @@ async def handle_api_save_settings(request):
     return web.json_response({"ok": True})
 
 
-
 async def handle_api_shop(request):
     _, guild, error = await web_authorized_guild(request)
     if error:
@@ -348,8 +345,10 @@ async def handle_api_shop(request):
         return response_json_error("Choose save or delete.")
     config.setdefault("shop_items", {})[str(guild.id)] = items
     if not save_config():
-        return response_json_error("Shop item could not be saved to the bot's config file. Check that the dashboard and bot share the same deployment and writable config path.", 500)
+        return response_json_error("Shop item could not be saved to the bot's config file.", 500)
     return web.json_response({"ok": True, "items": items})
+
+
 async def handle_api_ticket_panel(request):
     _, guild, error = await web_authorized_guild(request)
     if error:
@@ -436,7 +435,7 @@ async def handle_api_embed(request):
         return response_json_error("Supreme Bot needs permission to send messages and embeds in that channel.", 403)
     except discord.HTTPException:
         logging.exception("Failed to send dashboard embed")
-        return response_json_error("Could not send this embed. Check that it fits Discord's embed limits.", 502)
+        return response_json_error("Could not send this embed.", 502)
     await audit(guild, f"Dashboard embed sent by {session['user']['id']} to #{channel.name}")
     return web.json_response({"ok": True})
 
@@ -478,6 +477,7 @@ async def handle_api_money(request):
     await audit(guild, f"Dashboard wallet {action} by {session['user']['id']}: member {member.id}, amount {amount}")
     return web.json_response({"ok": True, "balance": account["balance"]})
 
+
 async def handle_api_activity(request):
     session = get_web_session(request)
     if not session:
@@ -502,6 +502,7 @@ async def handle_api_activity(request):
     save_config()
     return web.json_response({"ok": True})
 
+
 async def start_web_server():
     app = web.Application(client_max_size=64 * 1024)
     app.router.add_get("/", handle_ping)
@@ -521,7 +522,7 @@ async def start_web_server():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", PORT)
     await site.start()
-    logging.info("Supreme Bot dashboard started on 0.0.0.0:%s (Bot-Hosting.net SERVER_PORT)", PORT)
+    logging.info("Supreme Bot dashboard started on 0.0.0.0:%s", PORT)
 
 # =========================
 # CUSTOM EMOJI CONFIGURATION
@@ -545,37 +546,27 @@ EMOJIS = {
     "money": "<a:money:1567589905234661484>"
 }
 
-# Original emoji sources are kept so the bot can recreate app emojis after restarts.
 EMOJI_SOURCES = dict(EMOJIS)
 
 async def install_application_emojis():
-    """Save source emoji images locally and create missing application emojis."""
     fetch_emojis = getattr(bot, "fetch_application_emojis", None)
     create_emoji = getattr(bot, "create_application_emoji", None)
     if not callable(fetch_emojis) or not callable(create_emoji):
-        logging.warning("Automatic application emojis need discord.py 2.5 or newer.")
         return
-
     try:
         existing = {emoji.name: emoji for emoji in await fetch_emojis()}
-    except Exception as exc:
-        logging.warning("Could not fetch application emojis: %s", exc)
+    except Exception:
         return
-
     folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "emojis")
     os.makedirs(folder, exist_ok=True)
-    installed = 0
-
     async with aiohttp.ClientSession() as session:
         for name, source_markup in EMOJI_SOURCES.items():
             if name in existing:
                 EMOJIS[name] = str(existing[name])
                 continue
-
             source = discord.PartialEmoji.from_str(source_markup)
             if source.id is None:
                 continue
-
             extension = "gif" if source.animated else "png"
             image_path = os.path.join(folder, f"{name}.{extension}")
             try:
@@ -587,38 +578,19 @@ async def install_application_emojis():
                     async with session.get(image_url, timeout=aiohttp.ClientTimeout(total=30)) as response:
                         response.raise_for_status()
                         image_data = await response.read()
-                    if not image_data or len(image_data) > 256 * 1024:
-                        raise ValueError("Emoji image must be non-empty and no larger than 256 KiB")
                     with open(image_path, "wb") as image_file:
                         image_file.write(image_data)
-
                 created = await create_emoji(name=name, image=image_data)
                 EMOJIS[name] = str(created)
-                existing[name] = created
-                installed += 1
-            except Exception as exc:
-                logging.warning("Could not install application emoji %s: %s", name, exc)
+            except Exception:
+                pass
 
-    logging.info("Application emoji setup finished; created %s new emojis.", installed)
 config = {
-    "supervisor_roles": {},
-    "promodemo_channels": {},
-    "audit_channels": {},
-    "rank_ladders": {},
-    "staff_limits": {},
-    "economy": {},
-    "extra_owners": {},
-    "activity": {},
-    "prefixes": {},
-    "embed_settings": {},
-    "ticket_settings": {},
-    "economy_settings": {},
-    "shop_items": {},
-    "economy_no_cooldown": {},
-    "blacklists": {},
-    "disabled_guilds": {},
-    "ai_tasks": {},
-    "ai_channels": {}
+    "supervisor_roles": {}, "promodemo_channels": {}, "audit_channels": {},
+    "rank_ladders": {}, "staff_limits": {}, "economy": {}, "extra_owners": {},
+    "activity": {}, "prefixes": {}, "embed_settings": {}, "ticket_settings": {},
+    "economy_settings": {}, "shop_items": {}, "economy_no_cooldown": {},
+    "blacklists": {}, "disabled_guilds": {}, "ai_tasks": {}, "ai_channels": {}
 }
 
 
@@ -633,7 +605,7 @@ def load_config():
     except FileNotFoundError:
         save_config()
     except (json.JSONDecodeError, OSError):
-        logging.exception("Could not load config file")
+        pass
 
 
 def save_config():
@@ -644,7 +616,6 @@ def save_config():
         os.replace(temporary_file, CONFIG_FILE)
         return True
     except OSError:
-        logging.exception("Could not save configuration")
         return False
 
 
@@ -689,7 +660,6 @@ def get_shop_items(guild_id):
 
 
 def refresh_shop_items(guild_id):
-    """Read the persisted shop catalog before displaying it, if available."""
     gid = str(guild_id)
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as file:
@@ -697,11 +667,11 @@ def refresh_shop_items(guild_id):
         shops = saved.get("shop_items", {})
         if isinstance(shops, dict) and gid in shops and isinstance(shops[gid], list):
             config.setdefault("shop_items", {})[gid] = shops[gid]
-    except FileNotFoundError:
+    except Exception:
         pass
-    except (json.JSONDecodeError, OSError):
-        logging.exception("Could not refresh persisted shop catalog")
     return get_shop_items(guild_id)
+
+
 def get_ticket_settings(guild_id):
     defaults = {"title": f"{EMOJIS['ticket']} Support Ticket Center", "description": "Choose a ticket type from the dropdown below to open a private channel with our staff team."}
     return {**defaults, **config.get("ticket_settings", {}).get(str(guild_id), {})}
@@ -729,7 +699,7 @@ def guild_setting(setting, guild_id):
 
 
 # =========================
-# PERMISSION & LIMIT HELPERS
+# PERMISSION & CHECKS
 # =========================
 
 def user_is_owner(ctx):
@@ -779,47 +749,29 @@ def user_is_staff(ctx):
 def check_and_increment_action_limit(ctx, action_type, limit=3):
     if user_is_supervisor(ctx):
         return True, 0
-
-    import time
     now = time.time()
     user_id = str(ctx.author.id)
-
-    if "staff_limits" not in config:
-        config["staff_limits"] = {}
-
-    if user_id not in config["staff_limits"]:
-        config["staff_limits"][user_id] = {"kicks": [], "bans": []}
-
+    if "staff_limits" not in config: config["staff_limits"] = {}
+    if user_id not in config["staff_limits"]: config["staff_limits"][user_id] = {"kicks": [], "bans": []}
     timestamps = [t for t in config["staff_limits"][user_id].get(action_type, []) if now - t < 86400]
-
-    if len(timestamps) >= limit:
-        return False, len(timestamps)
-
+    if len(timestamps) >= limit: return False, len(timestamps)
     timestamps.append(now)
     config["staff_limits"][user_id][action_type] = timestamps
     save_config()
     return True, len(timestamps)
 
 
-# =========================
-# AUDIT LOGGING
-# =========================
-
 async def audit(guild, message):
     channel_id = guild_setting("audit_channels", guild.id)
-    if not channel_id:
-        return
+    if not channel_id: return
     channel = guild.get_channel(int(channel_id))
-    if channel is None:
-        return
-    try:
-        await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
-    except discord.HTTPException:
-        logging.exception("Failed to send audit log")
+    if channel:
+        try: await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException: pass
 
 
 # =========================
-# TICKET SYSTEM VIEWS
+# TICKET VIEWS
 # =========================
 
 class TicketCloseView(discord.ui.View):
@@ -831,10 +783,8 @@ class TicketCloseView(discord.ui.View):
         await interaction.response.send_message(f"{EMOJIS['warning']} Closing ticket in 5 seconds...", ephemeral=False)
         await audit(interaction.guild, f"Ticket closed by {interaction.user} | Channel: {interaction.channel.name}")
         await asyncio.sleep(5)
-        try:
-            await interaction.channel.delete(reason=f"Closed by {interaction.user}")
-        except discord.HTTPException:
-            pass
+        try: await interaction.channel.delete(reason=f"Closed by {interaction.user}")
+        except discord.HTTPException: pass
 
 
 class TicketSetupView(discord.ui.View):
@@ -842,1800 +792,161 @@ class TicketSetupView(discord.ui.View):
         super().__init__(timeout=None)
 
     @discord.ui.select(
-        placeholder="Choose a ticket type...",
-        min_values=1,
-        max_values=1,
-        custom_id="ticket_type_select",
+        placeholder="Choose a ticket type...", min_values=1, max_values=1, custom_id="ticket_type_select",
         options=[
             discord.SelectOption(label="General Support", value="support", description="Ask the team for help", emoji="🎟️"),
             discord.SelectOption(label="Report a Member", value="report", description="Privately report a server issue", emoji="🚩"),
             discord.SelectOption(label="Other Question", value="other", description="Contact the staff team", emoji="💬"),
-        ],
+        ]
     )
     async def create_ticket(self, interaction: discord.Interaction, select: discord.ui.Select):
-        guild = interaction.guild
-        member = interaction.user
-        ticket_type = select.values[0]
+        guild, member, ticket_type = interaction.guild, interaction.user, select.values[0]
         channel_name = f"ticket-{ticket_type}-{member.id}"
-
-        existing_channel = discord.utils.get(guild.text_channels, name=channel_name)
-        if existing_channel:
-            await interaction.response.send_message(f"{EMOJIS['error']} You already have this ticket open: {existing_channel.mention}", ephemeral=True)
-            return
-
+        if discord.utils.get(guild.text_channels, name=channel_name):
+            return await interaction.response.send_message(f"{EMOJIS['error']} You already have this ticket open.", ephemeral=True)
         await interaction.response.defer(ephemeral=True)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             member: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True)
         }
-
-        supervisor_role_id = guild_setting("supervisor_roles", guild.id)
-        if supervisor_role_id:
-            sup_role = guild.get_role(int(supervisor_role_id))
-            if sup_role:
-                overwrites[sup_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-
-        staff_team_role = discord.utils.find(lambda r: "staff team" in r.name.lower(), guild.roles)
-        if staff_team_role:
-            overwrites[staff_team_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-
-        category = discord.utils.get(guild.categories, name="Support Tickets")
-        if not category:
-            category = await guild.create_category("Support Tickets")
-
-        channel = await guild.create_text_channel(
-            name=channel_name,
-            category=category,
-            overwrites=overwrites,
-            topic=f"{ticket_type.title()} ticket for {member} ({member.id})"
-        )
-
-        embed = discord.Embed(
-            title=f"{EMOJIS['ticket']} {ticket_type.title()} Ticket",
-            description=f"Hello {member.mention}! Support staff will be with you shortly.\nUse the button below when you are ready to close this ticket.",
-            color=discord.Color.blue(),
-            timestamp=discord.utils.utcnow()
-        )
-        embed.set_footer(text="Supreme • Ticket System")
+        category = discord.utils.get(guild.categories, name="Support Tickets") or await guild.create_category("Support Tickets")
+        channel = await guild.create_text_channel(name=channel_name, category=category, overwrites=overwrites)
+        embed = discord.Embed(title=f"{EMOJIS['ticket']} {ticket_type.title()} Ticket", description=f"Hello {member.mention}! Support staff will be with you shortly.", color=discord.Color.blue())
         apply_embed_theme(guild.id, embed)
-
         await channel.send(embed=embed, view=TicketCloseView())
-        await interaction.followup.send(f"{EMOJIS['success']} Your {ticket_type} ticket is ready: {channel.mention}", ephemeral=True)
-        await audit(guild, f"{ticket_type.title()} ticket created by {member} ({member.id}) | Channel: {channel.name}")
-
-# =========================
-# EMBED HELPERS
-# =========================
-
-async def send_promodemo_embed(guild, member, role, action, moderator):
-    channel_id = guild_setting("promodemo_channels", guild.id)
-    if not channel_id:
-        return
-    channel = guild.get_channel(int(channel_id))
-    if channel is None:
-        return
-
-    promoted = action == "promoted"
-    embed = discord.Embed(
-        title=f"{EMOJIS['promo']} Staff Promotion" if promoted else f"{EMOJIS['demo']} Staff Demotion",
-        description=f"{member.mention} has been **promoted**!" if promoted else f"{member.mention} has been **demoted**.",
-        color=discord.Color.green() if promoted else discord.Color.red(),
-        timestamp=discord.utils.utcnow()
-    )
-    embed.add_field(name=f"{EMOJIS['user']} Staff Member", value=f"{member.mention}\n`{member.id}`", inline=False)
-    embed.add_field(name=f"{EMOJIS['ladder']} Role", value=role.mention, inline=True)
-    embed.add_field(name=f"{EMOJIS['shield']} Action By", value=moderator.mention, inline=True)
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.set_footer(text=f"{guild.name} • Supreme System")
-    apply_embed_theme(guild.id, embed)
-
-    try:
-        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
-    except discord.HTTPException:
-        pass
-
-
-async def change_staff_role(ctx, member, target_role, action):
-    if target_role is None:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} The specified or configured role could not be found in this server.", color=discord.Color.red()))
-        return
-
-    if member.id == ctx.author.id or member.id == ctx.guild.owner_id or target_role.is_default() or target_role.managed:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Action unauthorized or invalid role.", color=discord.Color.orange()))
-        return
-
-    try:
-        if action == "promote":
-            await member.add_roles(target_role, reason=f"Staff promotion by {ctx.author}")
-            result = "promoted"
-        else:
-            await member.remove_roles(target_role, reason=f"Staff demotion by {ctx.author}")
-            result = "demoted"
-
-        await send_promodemo_embed(ctx.guild, member, target_role, result, ctx.author)
-        await audit(ctx.guild, f"Staff {result}: {member} | Role: {target_role.name} | By: {ctx.author}")
-        emoji = EMOJIS['promo'] if result == "promoted" else EMOJIS['demo']
-        await ctx.reply(embed=discord.Embed(description=f"{emoji} {member.mention} was **{result}**: {target_role.mention}", color=discord.Color.green() if result == "promoted" else discord.Color.red()))
-    except discord.Forbidden:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Missing permissions to modify roles.", color=discord.Color.red()))
+        await interaction.followup.send(f"{EMOJIS['success']} Your ticket is ready: {channel.mention}", ephemeral=True)
 
 
 # =========================
-# MANAGEMENT & STAFF COMMANDS
-# =========================
-
-@bot.command(name="promo")
-@commands.guild_only()
-async def promo(ctx, staff: discord.Member, target_role: discord.Role = None):
-    """Promotes a staff member."""
-    if not user_is_supervisor(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
-        return
-
-    if target_role is None:
-        ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id))
-        if not ladder:
-            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} No rank ladder configured. Add roles using `{get_server_prefix(ctx.guild.id)}ranks add @role`", color=discord.Color.orange()))
-            return
-
-        user_role_ids = [r.id for r in staff.roles]
-        matched_index = -1
-        
-        for idx, r_id in enumerate(ladder):
-            if r_id in user_role_ids:
-                matched_index = idx
-
-        next_index = matched_index + 1
-        if next_index >= len(ladder):
-            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {staff.mention} is already at the highest rank on the ladder!", color=discord.Color.orange()))
-            return
-
-        target_role = ctx.guild.get_role(ladder[next_index])
-
-    await change_staff_role(ctx, staff, target_role, "promote")
-
-
-@bot.command(name="demo")
-@commands.guild_only()
-async def demo(ctx, staff: discord.Member, target_role: discord.Role = None):
-    """Demotes a staff member from their highest ladder rank."""
-    if not user_is_supervisor(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
-        return
-
-    if target_role is None:
-        ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id))
-        if not ladder:
-            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} No rank ladder configured. Add roles using `{get_server_prefix(ctx.guild.id)}ranks add @role`", color=discord.Color.orange()))
-            return
-
-        user_role_ids = [r.id for r in staff.roles]
-        
-        matched_index = -1
-        for idx, r_id in enumerate(ladder):
-            if r_id in user_role_ids:
-                matched_index = idx
-
-        if matched_index == -1:
-            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {staff.mention} does not have any rank from the ladder!", color=discord.Color.orange()))
-            return
-
-        target_role = ctx.guild.get_role(ladder[matched_index])
-
-    await change_staff_role(ctx, staff, target_role, "demote")
-
-
-@bot.command(name="super")
-@commands.guild_only()
-async def super_cmd(ctx, member: discord.Member):
-    """Assigns the supervisor role."""
-    if not user_is_owner(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
-        return
-
-    role_id = guild_setting("supervisor_roles", ctx.guild.id)
-    if not role_id:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Supervisor role not set up.", color=discord.Color.orange()))
-        return
-    assigned_role = ctx.guild.get_role(int(role_id))
-    if not assigned_role:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Configured supervisor role no longer exists.", color=discord.Color.red()))
-        return
-    await member.add_roles(assigned_role, reason=f"Supervisor assigned by {ctx.author}")
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Assigned supervisor role to {member.mention}.", color=discord.Color.green()))
-
-
-@bot.command(name="superintro")
-@commands.guild_only()
-async def superintro(ctx):
-    """Deletes the trigger message and introduces supervisor commands."""
-    try:
-        await ctx.message.delete()
-    except discord.Forbidden:
-        pass
-
-    if not user_is_supervisor(ctx):
-        err_msg = await ctx.send(embed=discord.Embed(description=f"{EMOJIS['error']} Only staff supervisors can use this command.", color=discord.Color.red()))
-        await err_msg.delete(delay=5)
-        return
-
-    embed = discord.Embed(
-        title=f"{EMOJIS['welcome']} Welcome Staff Supervisor!",
-        description=(
-            f"Welcome to the **Supreme Supervisor System**! {EMOJIS['shield']}\n"
-            "As a Supervisor, you have permission to manage the staff hierarchy using automated rank ladder commands."
-        ),
-        color=discord.Color.blurple(),
-        timestamp=discord.utils.utcnow()
-    )
-
-    embed.add_field(
-        name=f"{EMOJIS['promo']} `{get_server_prefix(ctx.guild.id)}promo @member [@role]`",
-        value=(
-            f"{EMOJIS['bullet']} Promotes a staff member.\n"
-            f"{EMOJIS['bullet']} **Auto Ladder:** If no role is given, advances them to the next step up."
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name=f"{EMOJIS['demo']} `{get_server_prefix(ctx.guild.id)}demo @member [@role]`",
-        value=(
-            f"{EMOJIS['bullet']} Demotes a staff member.\n"
-            f"{EMOJIS['bullet']} **Auto Ladder:** If no role is given, strips their highest rank to drop them down."
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name=f"{EMOJIS['gear']} `{get_server_prefix(ctx.guild.id)}role @member @role`",
-        value=f"{EMOJIS['bullet']} Quickly toggles an extra role on or off for a member.",
-        inline=False
-    )
-
-    embed.set_footer(text=f"Requested by {ctx.author.display_name} • Supreme Guide", icon_url=ctx.author.display_avatar.url)
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="staffintro")
-@commands.guild_only()
-async def staffintro(ctx):
-    """Deletes the trigger message and introduces staff moderation commands."""
-    try:
-        await ctx.message.delete()
-    except discord.Forbidden:
-        pass
-
-    if not user_is_staff(ctx):
-        err_msg = await ctx.send(embed=discord.Embed(description=f"{EMOJIS['error']} Only staff members can use this command.", color=discord.Color.red()))
-        await err_msg.delete(delay=5)
-        return
-
-    embed = discord.Embed(
-        title=f"{EMOJIS['welcome']} Welcome to the Supreme Staff Team!",
-        description=(
-            f"Hello {ctx.author.mention}! Thank you for keeping our community safe and active. {EMOJIS['shield']}\n"
-            "Here is a quick introduction to your staff moderation tools and commands."
-        ),
-        color=discord.Color.green(),
-        timestamp=discord.utils.utcnow()
-    )
-
-    embed.add_field(
-        name=f"{EMOJIS['warning']} Moderation Commands (Max 3 Kicks/Bans Per 24 Hours)",
-        value=(
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}kick @member [reason]` — Kicks a disruptive user from the server.\n"
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}ban @member [reason]` — Permanently bans a rule-breaker.\n"
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}mute @member [reason]` — Times out a user for 10 minutes.\n"
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}clear [amount]` — Purges recent chat messages cleanly."
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name=f"{EMOJIS['user']} Utility & Information",
-        value=(
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}userinfo [@member]` — Checks account creation, join dates, and roles.\n"
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}avatar [@member]` — Views high-resolution profile pictures."
-        ),
-        inline=False
-    )
-
-    embed.set_footer(text=f"Requested by {ctx.author.display_name} • Supreme Guide", icon_url=ctx.author.display_avatar.url)
-    await ctx.send(embed=embed)
-
-
-@bot.command(name="staff")
-@commands.guild_only()
-async def staff_cmd(ctx, member: discord.Member):
-    """Assigns Staff Team and Trial Mod/Moderator roles automatically."""
-    if not user_is_owner(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
-        return
-
-    staff_team_role = discord.utils.find(lambda r: "staff team" in r.name.lower(), ctx.guild.roles)
-    trial_mod_role = discord.utils.find(lambda r: "trial mod" in r.name.lower() or "trial moderator" in r.name.lower(), ctx.guild.roles)
-
-    found_roles = [r for r in [staff_team_role, trial_mod_role] if r]
-    if not found_roles:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Could not find 'Staff Team' or 'Trial Mod/Moderator' roles in this server.", color=discord.Color.red()))
-        return
-
-    await member.add_roles(*found_roles, reason=f"Staff roles assigned by {ctx.author}")
-    assigned_mentions = ", ".join([r.mention for r in found_roles])
-    
-    embed = discord.Embed(
-        title=f"{EMOJIS['success']} Staff Team Roles Assigned",
-        description=f"Successfully assigned {assigned_mentions} to {member.mention}.",
-        color=discord.Color.green(),
-        timestamp=discord.utils.utcnow()
-    )
-    embed.set_footer(text=f"Action by {ctx.author}", icon_url=ctx.author.display_avatar.url)
-    await ctx.reply(embed=embed)
-    await audit(ctx.guild, f"Staff roles ({assigned_mentions}) given to {member} ({member.id}) by {ctx.author}")
-
-
-@bot.command(name="role")
-@commands.guild_only()
-async def role_cmd(ctx, member: discord.Member, target_role: discord.Role):
-    """Toggles a role on a member."""
-    if not user_is_supervisor(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
-        return
-
-    if target_role in member.roles:
-        await member.remove_roles(target_role)
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['demo']} Removed {target_role.mention} from {member.mention}.", color=discord.Color.red()))
-    else:
-        await member.add_roles(target_role)
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['promo']} Added {target_role.mention} to {member.mention}.", color=discord.Color.green()))
-
-
-@bot.command(name="steal")
-@commands.guild_only()
-async def steal(ctx, emoji: str, name: str = None):
-    """Steals an emoji into the server."""
-    if not user_is_owner(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
-        return
-
-    import re
-    match = re.match(r"<(a?):([a-zA-Z0-9_]+):([0-9]+)>", emoji)
-    if not match:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Invalid custom emoji.", color=discord.Color.red()))
-        return
-    animated, e_name, e_id = match.groups()
-    url = f"https://cdn.discordapp.com/emojis/{e_id}.{'gif' if animated=='a' else 'png'}?v=1"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            image_bytes = await resp.read()
-    new_emoji = await ctx.guild.create_custom_emoji(name=name or e_name, image=image_bytes)
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Stole and added {new_emoji}!", color=discord.Color.green()))
-
-
-# =========================
-# TICKET SETUP COMMAND
-# =========================
-
-@bot.command(name="ticketsetup")
-@commands.guild_only()
-async def ticketsetup(ctx):
-    """Deploys the persistent ticket creation panel."""
-    if not user_is_supervisor(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the owners or supervisors can set up tickets.", color=discord.Color.red()))
-        return
-
-    ticket_settings = get_ticket_settings(ctx.guild.id)
-    embed = discord.Embed(title=ticket_settings["title"], description=ticket_settings["description"], color=discord.Color(parse_embed_color(get_embed_settings(ctx.guild.id)["color"])), timestamp=discord.utils.utcnow())
-    apply_embed_theme(ctx.guild.id, embed)
-
-    await ctx.send(embed=embed, view=TicketSetupView())
-
-
-# =========================
-# MODERATION COMMANDS
-# =========================
-
-# =========================
-# ECONOMY & ADMIN COMMANDS
-# =========================
-
-ECONOMY_SPAM_TRACKER = {}
-ECONOMY_SPAM_WINDOW_SECONDS = 10
-ECONOMY_SPAM_COMMAND_LIMIT = 5
-
-
-class EconomyChannelOnly(commands.CheckFailure):
-    pass
-
-
-class EconomySpamTriggered(commands.CheckFailure):
-    pass
-
-
-def record_economy_command(guild_id, user_id):
-    key = (int(guild_id), int(user_id))
-    now = time.monotonic()
-    recent = [stamp for stamp in ECONOMY_SPAM_TRACKER.get(key, []) if now - stamp < ECONOMY_SPAM_WINDOW_SECONDS]
-    recent.append(now)
-    if len(recent) >= ECONOMY_SPAM_COMMAND_LIMIT:
-        ECONOMY_SPAM_TRACKER.pop(key, None)
-        account = economy_account(guild_id, user_id)
-        removed = int(account.get("balance", 0)) + int(account.get("bank", 0))
-        account["balance"] = 0
-        account["bank"] = 0
-        save_config()
-        return True, removed
-    ECONOMY_SPAM_TRACKER[key] = recent
-    return False, 0
-
-
-async def economy_command_guard(ctx):
-    if ctx.guild is None or ctx.channel.id != ECONOMY_CHANNEL_ID:
-        raise EconomyChannelOnly()
-    triggered, removed = record_economy_command(ctx.guild.id, ctx.author.id)
-    if triggered:
-        await audit(ctx.guild, f"Economy spam protection reset wallet and bank for {ctx.author.id}; removed {removed:,} coins")
-        await ctx.reply(embed=economy_embed(f"Spam protection triggered: you used 5 economy commands within 10 seconds. Your wallet and bank were reset (**{removed:,}** coins removed)."), mention_author=False)
-        raise EconomySpamTriggered()
-    return True
-
-@bot.command(name="balance", aliases=["bal"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def balance(ctx, member: discord.Member = None):
-    """Check your own or another member's wallet."""
-    member = member or ctx.author
-    account = economy_account(ctx.guild.id, member.id)
-    await ctx.reply(embed=economy_embed(f"**{member.display_name}** has **{account['balance']:,}** coins."))
-
-
-@bot.command(name="daily")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def daily(ctx):
-    """Claim a once-per-day coin reward."""
-    import time
-    account = economy_account(ctx.guild.id, ctx.author.id)
-    remaining = 0 if economy_has_cooldown_immunity(ctx) else 86400 - (int(time.time()) - int(account.get("last_daily", 0)))
-    if remaining > 0:
-        hours, minutes = divmod(remaining, 3600)
-        await ctx.reply(embed=economy_embed(f"Your next daily reward is ready in **{hours}h {minutes // 60}m**."))
-        return
-    economy_settings = get_economy_settings(ctx.guild.id)
-    reward = random.randint(int(economy_settings["daily_min"]), int(economy_settings["daily_max"]))
-    account["balance"] += reward
-    account.setdefault("stats", {}).setdefault("earned", 0)
-    account["stats"]["earned"] += reward
-    elapsed_since_daily = int(time.time()) - int(account.get("last_daily", 0))
-    if not account.get("last_daily", 0) or elapsed_since_daily > 172800:
-        account["daily_streak"] = 1
-    elif elapsed_since_daily >= 86400:
-        account["daily_streak"] = int(account.get("daily_streak", 0)) + 1
-    account["last_daily"] = int(time.time())
-    save_config()
-    await ctx.reply(embed=economy_embed(f"Daily reward claimed! You received **{reward}** coins. Balance: **{account['balance']:,}**."))
-
-
-@bot.command(name="work", aliases=["job"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def work(ctx):
-    """Work for a random coin reward; 60-second cooldown."""
-    import time
-    account = economy_account(ctx.guild.id, ctx.author.id)
-    economy_settings = get_economy_settings(ctx.guild.id)
-    remaining = 0 if economy_has_cooldown_immunity(ctx) else int(economy_settings["work_cooldown"]) - (int(time.time()) - int(account.get("last_work", 0)))
-    if remaining > 0:
-        await ctx.reply(embed=economy_embed(f"Catch your breath! You can work again in **{remaining}s**."))
-        return
-    reward = random.randint(int(economy_settings["work_min"]), int(economy_settings["work_max"]))
-    jobs = ["delivered a dragon's lunch", "organized a wizard's bookshelf", "DJ'd a tiny robot party", "found a pile of coins", "walked a very polite dinosaur"]
-    account["balance"] += reward
-    account["stats"]["earned"] += reward
-    account["stats"]["worked"] = int(account["stats"].get("worked", 0)) + 1
-    account["last_work"] = int(time.time())
-    save_config()
-    await ctx.reply(embed=economy_embed(f"You {random.choice(jobs)} and earned **{reward}** coins. Balance: **{account['balance']:,}**."))
-
-
-@bot.command(name="pay", aliases=["transfer"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def pay(ctx, member: discord.Member, amount: int):
-    """Send coins to another member."""
-    if member.bot or member.id == ctx.author.id or not 1 <= amount <= 1000000:
-        await ctx.reply(embed=economy_embed("Choose another member and an amount between 1 and 1,000,000."))
-        return
-    sender = economy_account(ctx.guild.id, ctx.author.id)
-    if sender["balance"] < amount:
-        await ctx.reply(embed=economy_embed("You don't have enough coins for that payment."))
-        return
-    recipient = economy_account(ctx.guild.id, member.id)
-    sender["balance"] -= amount
-    recipient["balance"] += amount
-    save_config()
-    await ctx.reply(embed=economy_embed(f"Sent **{amount:,}** coins to {member.mention}. Your balance is **{sender['balance']:,}**."))
-
-
-@bot.command(name="leaderboard", aliases=["richlist", "topcoins"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def leaderboard(ctx):
-    """Show the ten richest members in this server."""
-    guild_accounts = config.setdefault("economy", {}).setdefault(str(ctx.guild.id), {})
-    ranked = sorted(guild_accounts.items(), key=lambda item: int(item[1].get("balance", 0)), reverse=True)[:10]
-    if not ranked:
-        await ctx.reply(embed=economy_embed(f"No wallets yet. Start with `{get_server_prefix(ctx.guild.id)}daily`!"))
-        return
-    rows = [f"**{rank}.** <@{user_id}> — **{int(account.get('balance', 0)):,}** coins" for rank, (user_id, account) in enumerate(ranked, 1)]
-    embed = economy_embed("🏆 **Coin Leaderboard**\n" + "\n".join(rows))
-    await ctx.reply(embed=embed)
-
-
-async def require_economy_admin(ctx):
-    if user_is_supervisor(ctx):
-        return True
-    await ctx.reply(embed=economy_embed("Only the server owner or configured supervisor can manage member balances.", discord.Color.red()))
-    return False
-
-
-@bot.command(name="nocooldown")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def nocooldown(ctx, member: discord.Member):
-    """Owner: let a member skip all economy cooldowns and protect them from rob."""
-    if not user_is_owner(ctx):
-        return await ctx.reply(embed=economy_embed("Only the bot owner, server owner, or an extra owner can grant this."))
-    guild_id = str(ctx.guild.id)
-    grants = config.setdefault("economy_no_cooldown", {}).setdefault(guild_id, [])
-    if str(member.id) in {str(user_id) for user_id in grants}:
-        return await ctx.reply(embed=economy_embed(f"{member.mention} already has economy cooldown immunity."))
-    grants.append(str(member.id))
-    save_config()
-    await audit(ctx.guild, f"Economy cooldown immunity granted by {ctx.author.id} to {member.id}")
-    await ctx.reply(embed=economy_embed(f"Granted {member.mention} no economy cooldowns and robbery protection."))
-
-
-@bot.command(name="removenocooldown", aliases=["cooldown"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def removenocooldown(ctx, member: discord.Member):
-    """Owner: remove a member's granted economy cooldown immunity."""
-    if not user_is_owner(ctx):
-        return await ctx.reply(embed=economy_embed("Only the bot owner, server owner, or an extra owner can remove this."))
-    guild_id = str(ctx.guild.id)
-    grants = config.setdefault("economy_no_cooldown", {}).setdefault(guild_id, [])
-    if str(member.id) not in {str(user_id) for user_id in grants}:
-        return await ctx.reply(embed=economy_embed(f"{member.mention} does not have a granted cooldown exemption."))
-    config["economy_no_cooldown"][guild_id] = [str(user_id) for user_id in grants if str(user_id) != str(member.id)]
-    save_config()
-    await audit(ctx.guild, f"Economy cooldown immunity removed by {ctx.author.id} from {member.id}")
-    await ctx.reply(embed=economy_embed(f"Removed the economy cooldown exemption from {member.mention}."))
-
-
-@bot.command(name="addmoney", aliases=["addcoins"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def addmoney(ctx, target: str, amount: int):
-    """Admin: add coins to one member or all server members' wallets."""
-    if not await require_economy_admin(ctx): return
-    if not 1 <= amount <= 1000000000:
-        await ctx.reply(embed=economy_embed("Amount must be from 1 to 1,000,000,000.")); return
-    if target.lower() == "all":
-        members = {}
-        try:
-            async for guild_member in ctx.guild.fetch_members(limit=None):
-                if not guild_member.bot:
-                    members[guild_member.id] = guild_member
-        except discord.HTTPException:
-            return await ctx.reply(embed=economy_embed("I couldn't retrieve the full member list. Check the Server Members Intent and try again; no wallets were changed."))
-        if not members:
-            return await ctx.reply(embed=economy_embed("There are no member wallets to update."))
-        for user_id, member in members.items():
-            account = economy_account(ctx.guild.id, user_id)
-            account["balance"] += amount
-            account.setdefault("stats", {}).setdefault("earned", 0)
-            account["stats"]["earned"] += amount
-        save_config()
-        await audit(ctx.guild, f"Bulk addmoney by {ctx.author.id}: +{amount:,} coins for {len(members)} wallets")
-        return await ctx.reply(embed=economy_embed(f"Added **{amount:,}** coins to **{len(members):,}** member wallets."))
-    try:
-        member = await commands.MemberConverter().convert(ctx, target)
-    except commands.BadArgument:
-        return await ctx.reply(embed=economy_embed("Mention a server member or use `all`."))
-    account = economy_account(ctx.guild.id, member.id)
-    account["balance"] += amount
-    account.setdefault("stats", {}).setdefault("earned", 0)
-    account["stats"]["earned"] += amount
-    save_config()
-    await ctx.reply(embed=economy_embed(f"Added **{amount:,}** coins to {member.mention}. New balance: **{account['balance']:,}**."))
-
-
-@bot.command(name="removemoney", aliases=["removecoins"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def removemoney(ctx, member: discord.Member, amount: int):
-    """Admin: remove coins from a member's wallet."""
-    if not await require_economy_admin(ctx): return
-    if not 1 <= amount <= 1000000000:
-        await ctx.reply(embed=economy_embed("Amount must be from 1 to 1,000,000,000.")); return
-    account = economy_account(ctx.guild.id, member.id)
-    removed = min(amount, account["balance"])
-    account["balance"] -= removed
-    save_config()
-    await ctx.reply(embed=economy_embed(f"Removed **{removed:,}** coins from {member.mention}. New balance: **{account['balance']:,}**."))
-
-
-@bot.command(name="setmoney", aliases=["setcoins"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def setmoney(ctx, member: discord.Member, amount: int):
-    """Admin: set a member's wallet balance."""
-    if not await require_economy_admin(ctx): return
-    if not 0 <= amount <= 1000000000:
-        await ctx.reply(embed=economy_embed("Balance must be from 0 to 1,000,000,000.")); return
-    account = economy_account(ctx.guild.id, member.id)
-    previous = account["balance"]
-    account["balance"] = amount
-    save_config()
-    await ctx.reply(embed=economy_embed(f"Set {member.mention}'s balance from **{previous:,}** to **{amount:,}** coins."))
-
-
-@bot.command(name="resetmoney", aliases=["resetcoins"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def resetmoney(ctx, member: discord.Member = None):
-    """Admin: reset one member's wallet."""
-    if not await require_economy_admin(ctx): return
-    if not member:
-        return await ctx.reply(embed=economy_embed("Mention one member, or confirm a full reset with `reseteconomy all`."))
-    account = economy_account(ctx.guild.id, member.id)
-    account.update({"balance": 0, "last_daily": 0, "last_work": 0, "bank": 0, "inventory": {}, "daily_streak": 0})
-    message = f"Reset {member.mention}'s wallet, bank, and inventory."
-    save_config()
-    await ctx.reply(embed=economy_embed(message, discord.Color.orange()))
-
-
-@bot.command(name="reseteconomy")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def reseteconomy(ctx, target: str):
-    """Admin: reset every wallet, bank, and inventory in the server."""
-    if not await require_economy_admin(ctx):
-        return
-    if target.lower() != "all":
-        return await ctx.reply(embed=economy_embed("Confirm a full server reset with `reseteconomy all`."))
-    accounts = config.setdefault("economy", {}).setdefault(str(ctx.guild.id), {})
-    count = len(accounts)
-    accounts.clear()
-    save_config()
-    await audit(ctx.guild, f"Full economy reset by {ctx.author.id}: cleared {count} wallets")
-    await ctx.reply(embed=economy_embed(f"Reset the entire server economy: **{count:,}** saved wallets cleared. Shop items and economy settings were kept.", discord.Color.orange()))
-
-
-# Shared economy helpers. Every cooldown and item count is stored in config.json.
-def economy_has_cooldown_immunity(ctx, member=None):
-    member = member or ctx.author
-    guild_id = str(ctx.guild.id)
-    trusted_owners = {str(uid) for uid in config.get("extra_owners", {}).get(guild_id, [])}
-    no_cooldown = {str(uid) for uid in config.get("economy_no_cooldown", {}).get(guild_id, [])}
-    return (member.id == OWNER_ID or member.id == ctx.guild.owner_id
-            or str(member.id) in trusted_owners or str(member.id) in no_cooldown)
-
-
-def economy_cooldown_remaining(account, key, seconds, ctx=None):
-    if ctx and economy_has_cooldown_immunity(ctx):
-        return 0
-    return max(0, int(seconds) - (int(time.time()) - int(account.setdefault("cooldowns", {}).get(key, 0))))
-
-
-def economy_mark_cooldown(account, key):
-    account.setdefault("cooldowns", {})[key] = int(time.time())
-
-
-def economy_add(account, amount):
-    amount = int(amount)
-    account["balance"] += amount
-    account.setdefault("stats", {}).setdefault("earned", 0)
-    account["stats"]["earned"] += amount
-
-
-def economy_item(items, query):
-    query = str(query).strip().lower()
-    return next((item for item in items if item.get("id", "").lower() == query or item.get("name", "").lower() == query), None)
-
-
-def parse_amount(value, account):
-    return int(account["balance"]) if str(value).lower() == "all" else int(value)
-
-
-@bot.command(name="bank", aliases=["vault"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def bank(ctx, member: discord.Member = None):
-    member = member or ctx.author
-    a = economy_account(ctx.guild.id, member.id)
-    await ctx.reply(embed=economy_embed(f"**{member.display_name}** — wallet **{a['balance']:,}**, bank **{a['bank']:,}**, total **{a['balance'] + a['bank']:,}** coins."))
-
-
-@bot.command(name="deposit")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def deposit(ctx, amount: str):
-    a = economy_account(ctx.guild.id, ctx.author.id)
-    try: amount = parse_amount(amount, a)
-    except ValueError: amount = 0
-    if not 1 <= amount <= a["balance"]:
-        return await ctx.reply(embed=economy_embed("Choose an amount you have, or use `all`."))
-    a["balance"] -= amount; a["bank"] += amount; save_config()
-    await ctx.reply(embed=economy_embed(f"Deposited **{amount:,}** coins. Bank: **{a['bank']:,}**."))
-
-
-@bot.command(name="withdraw")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def withdraw(ctx, amount: str):
-    a = economy_account(ctx.guild.id, ctx.author.id)
-    try: amount = parse_amount(amount, {"balance": a["bank"]})
-    except ValueError: amount = 0
-    if not 1 <= amount <= a["bank"]:
-        return await ctx.reply(embed=economy_embed("Choose an amount in your bank, or use `all`."))
-    a["bank"] -= amount; a["balance"] += amount; save_config()
-    await ctx.reply(embed=economy_embed(f"Withdrew **{amount:,}** coins. Wallet: **{a['balance']:,}**."))
-
-
-@bot.command(name="weekly")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def weekly(ctx):
-    a = economy_account(ctx.guild.id, ctx.author.id); wait = economy_cooldown_remaining(a, "weekly", 604800, ctx)
-    if wait: return await ctx.reply(embed=economy_embed(f"Weekly reward ready in **{wait // 86400}d {(wait % 86400) // 3600}h**."))
-    reward = random.randint(500, 1200); economy_add(a, reward); economy_mark_cooldown(a, "weekly"); save_config()
-    await ctx.reply(embed=economy_embed(f"Weekly bonus: **+{reward:,}** coins!"))
-
-
-@bot.command(name="monthly")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def monthly(ctx):
-    a = economy_account(ctx.guild.id, ctx.author.id); wait = economy_cooldown_remaining(a, "monthly", 2592000, ctx)
-    if wait: return await ctx.reply(embed=economy_embed(f"Monthly reward ready in **{wait // 86400} days**."))
-    reward = random.randint(2500, 6000); economy_add(a, reward); economy_mark_cooldown(a, "monthly"); save_config()
-    await ctx.reply(embed=economy_embed(f"Monthly bonus: **+{reward:,}** coins!"))
-
-
-async def timed_earn(ctx, key, seconds, low, high, success_text, failure_text=None, fail_chance=0):
-    a = economy_account(ctx.guild.id, ctx.author.id); wait = economy_cooldown_remaining(a, key, seconds, ctx)
-    if wait: return await ctx.reply(embed=economy_embed(f"Try again in **{wait}s**."))
-    economy_mark_cooldown(a, key)
-    if failure_text and random.random() < fail_chance:
-        loss = min(a["balance"], random.randint(1, max(1, high // 2))); a["balance"] -= loss
-        a.setdefault("stats", {}).setdefault("spent", 0); a["stats"]["spent"] += loss
-        text = failure_text.format(loss=loss)
-    else:
-        reward = random.randint(low, high); economy_add(a, reward); text = success_text.format(reward=reward)
-    save_config(); await ctx.reply(embed=economy_embed(text))
-
-
-@bot.command(name="beg")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def beg(ctx):
-    await timed_earn(ctx, "beg", 90, 5, 80, "A friendly stranger gave you **{reward}** coins.", "The guard caught you. You paid **{loss}** coins in fines.", .08)
-
-
-@bot.command(name="hunt")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def hunt(ctx):
-    await timed_earn(ctx, "hunt", 60, 25, 180, "Your hunt was a success! You earned **{reward}** coins.", "The forest ranger fined you **{loss}** coins.", .12)
-
-
-@bot.command(name="fish")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def fish(ctx):
-    await timed_earn(ctx, "fish", 45, 15, 140, "You caught a rare fish and sold it for **{reward}** coins.")
-
-
-@bot.command(name="crime")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def crime(ctx):
-    await timed_earn(ctx, "crime", 120, 70, 350, "The caper worked! You got **{reward}** coins.", "The plan went wrong and you lost **{loss}** coins.", .40)
-
-
-@bot.command(name="rob")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def rob(ctx, member: discord.Member):
-    if member.bot or member.id == ctx.author.id: return await ctx.reply(embed=economy_embed("Pick another human member."))
-    if economy_has_cooldown_immunity(ctx, member): return await ctx.reply(embed=economy_embed("That member is protected from robbery."))
-    a = economy_account(ctx.guild.id, ctx.author.id); target = economy_account(ctx.guild.id, member.id)
-    wait = economy_cooldown_remaining(a, "rob", 300, ctx)
-    if wait: return await ctx.reply(embed=economy_embed(f"The heat is high. Try again in **{wait}s**."))
-    economy_mark_cooldown(a, "rob")
-    if random.random() < .38 and target["balance"] > 0:
-        amount = min(target["balance"], random.randint(1, max(1, target["balance"] // 3)))
-        target["balance"] -= amount; economy_add(a, amount); result = f"You grabbed **{amount:,}** coins from {member.mention}!"
-    else:
-        fine = min(a["balance"], random.randint(20, 150)); a["balance"] -= fine; result = f"The attempt failed and you paid a **{fine:,}** coin fine."
-    save_config(); await ctx.reply(embed=economy_embed(result))
-
-
-@bot.command(name="profile", aliases=["economyprofile"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def profile(ctx, member: discord.Member = None):
-    member = member or ctx.author; a = economy_account(ctx.guild.id, member.id)
-    embed = discord.Embed(title=f"{member.display_name}'s Coin Profile", color=discord.Color.blurple())
-    embed.set_thumbnail(url=member.display_avatar.url)
-    embed.add_field(name="Wallet", value=f"{EMOJIS['money']} {a['balance']:,}")
-    embed.add_field(name="Bank", value=f"{EMOJIS['money']} {a['bank']:,}")
-    embed.add_field(name="Lifetime earned", value=f"{a['stats'].get('earned', 0):,}")
-    embed.add_field(name="Daily streak", value=str(a.get("daily_streak", 0)))
-    await ctx.reply(embed=embed)
-
-
-@bot.command(name="inventory", aliases=["inv"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def inventory(ctx, member: discord.Member = None):
-    member = member or ctx.author; a = economy_account(ctx.guild.id, member.id); lines=[]
-    for item_id, qty in a["inventory"].items():
-        item = economy_item(refresh_shop_items(ctx.guild.id), item_id)
-        lines.append(f"{(item or {}).get('emoji', '📦')} **{(item or {}).get('name', item_id)}** × {qty}")
-    await ctx.reply(embed=economy_embed("\n".join(lines) if lines else f"{member.display_name}'s inventory is empty."))
-
-
-@bot.command(name="shop", aliases=["store"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def shop(ctx):
-    items = refresh_shop_items(ctx.guild.id)
-    if not items: return await ctx.reply(embed=economy_embed(f"No shop items are saved for this server (**{ctx.guild.id}**). Select this exact server in the dashboard, and make sure the dashboard and bot run in the same deployment/config."))
-    embed = discord.Embed(title="Supreme Shop", description="Buy with `buy <item-id> [quantity]` · sell back with `sell <item-id> [quantity]`", color=discord.Color.blurple())
-    for item in items[:10]: embed.add_field(name=f"{item.get('emoji', '🛍️')} {item['name']} · {int(item['price']):,}", value=f"`{item['id']}` — {item.get('description') or 'A special shop item.'}", inline=False)
-    await ctx.reply(embed=embed)
-
-
-@bot.command(name="buy")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def buy(ctx, item_id: str, quantity: int = 1):
-    item = economy_item(refresh_shop_items(ctx.guild.id), item_id)
-    if not item: return await ctx.reply(embed=economy_embed("Item not found. Check `shop` for item IDs."))
-    if not 1 <= quantity <= 100: return await ctx.reply(embed=economy_embed("Quantity must be from 1 to 100."))
-    a = economy_account(ctx.guild.id, ctx.author.id); price = int(item["price"]) * quantity
-    if a["balance"] < price: return await ctx.reply(embed=economy_embed(f"You need **{price - a['balance']:,}** more coins."))
-    a["balance"] -= price; a["inventory"][item["id"]] = int(a["inventory"].get(item["id"], 0)) + quantity
-    a["stats"]["spent"] = int(a["stats"].get("spent", 0)) + price; save_config()
-    await ctx.reply(embed=economy_embed(f"Bought {item.get('emoji', '🛍️')} **{item['name']} × {quantity}** for **{price:,}** coins."))
-
-
-@bot.command(name="sell")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def sell(ctx, item_id: str, quantity: int = 1):
-    item = economy_item(refresh_shop_items(ctx.guild.id), item_id)
-    if not item: return await ctx.reply(embed=economy_embed("Item not found in the server shop."))
-    a = economy_account(ctx.guild.id, ctx.author.id); owned = int(a["inventory"].get(item["id"], 0))
-    if not 1 <= quantity <= owned: return await ctx.reply(embed=economy_embed(f"You own **{owned}** of that item."))
-    a["inventory"][item["id"]] = owned - quantity
-    if not a["inventory"][item["id"]]: a["inventory"].pop(item["id"])
-    refund = max(1, int(item["price"]) // 2) * quantity; economy_add(a, refund); save_config()
-    await ctx.reply(embed=economy_embed(f"Sold **{quantity} × {item['name']}** for **{refund:,}** coins."))
-
-
-@bot.command(name="use")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def use_item(ctx, item_id: str):
-    a = economy_account(ctx.guild.id, ctx.author.id); item = economy_item(refresh_shop_items(ctx.guild.id), item_id)
-    owned = int(a["inventory"].get(item_id.lower(), 0))
-    if not item or owned < 1: return await ctx.reply(embed=economy_embed("You don't own that item."))
-    a["inventory"][item["id"]] = owned - 1
-    if not a["inventory"][item["id"]]: a["inventory"].pop(item["id"])
-    save_config(); await ctx.reply(embed=economy_embed(f"You used {item.get('emoji', '✨')} **{item['name']}**. {item.get('description', '')}"))
-
-
-async def withdraw_item_autocomplete(interaction: discord.Interaction, current: str):
-    if interaction.guild is None:
-        return []
-    account = economy_account(interaction.guild.id, interaction.user.id)
-    shop_items = get_shop_items(interaction.guild.id)
-    choices = []
-    for item_id, quantity in account.get("inventory", {}).items():
-        if int(quantity) <= 0:
-            continue
-        item = economy_item(shop_items, item_id)
-        name = item.get("name", item_id) if item else item_id
-        emoji = item.get("emoji", "📦") if item else "📦"
-        if current.lower() in item_id.lower() or current.lower() in name.lower():
-            choices.append(discord.app_commands.Choice(name=f"{emoji} {name} · {item_id}"[:100], value=item_id))
-    return choices[:25]
-
-
-@bot.tree.command(name="withdraw", description="Redeem one shop item from your inventory")
-@discord.app_commands.describe(item_id="Choose an item you own to redeem")
-@discord.app_commands.autocomplete(item_id=withdraw_item_autocomplete)
-async def slash_withdraw(interaction: discord.Interaction, item_id: str):
-    if interaction.guild is None:
-        return await interaction.response.send_message("Use this in a server where Supreme Bot is installed.", ephemeral=True)
-    if interaction.channel_id != ECONOMY_CHANNEL_ID:
-        return await interaction.response.send_message(f"Economy commands are only available in <#{ECONOMY_CHANNEL_ID}>.", ephemeral=True)
-    guild = interaction.guild
-    member = interaction.user
-    guild_id = str(guild.id)
-    if str(member.id) in {str(user_id) for user_id in config.get("blacklists", {}).get(guild_id, [])}:
-        return await interaction.response.send_message("You are blacklisted from using Supreme Bot commands in this server.", ephemeral=True)
-    if config.get("disabled_guilds", {}).get(guild_id, False):
-        return await interaction.response.send_message("Supreme Bot commands are currently disabled in this server.", ephemeral=True)
-    triggered, removed = record_economy_command(guild.id, member.id)
-    if triggered:
-        await audit(guild, f"Economy spam protection reset wallet and bank for {member.id}; removed {removed:,} coins")
-        return await interaction.response.send_message(embed=economy_embed(f"Spam protection triggered: 5 economy commands within 10 seconds reset your wallet and bank (**{removed:,}** coins removed)."), ephemeral=True)
-    account = economy_account(guild.id, member.id)
-    item = economy_item(refresh_shop_items(guild.id), item_id)
-    resolved_id = item["id"] if item else item_id.strip().lower()
-    owned = int(account["inventory"].get(resolved_id, 0))
-    if owned < 1:
-        return await interaction.response.send_message("You don't have that item in your inventory.", ephemeral=True)
-    item_name = item.get("name", resolved_id) if item else resolved_id
-    item_emoji = item.get("emoji", "✨") if item else "✨"
-    item_description = item.get("description", "") if item else ""
-    channel_name = f"redeem-{member.id}-{resolved_id}"[:95]
-    existing = discord.utils.get(guild.text_channels, name=channel_name)
-    if existing:
-        return await interaction.response.send_message(f"You already have a ticket for this item: {existing.mention}", ephemeral=True)
-
-    await interaction.response.defer(ephemeral=True, thinking=True)
-    ticket_channel = None
-    try:
-        bot_member = guild.me or await guild.fetch_member(bot.user.id)
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            member: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-            bot_member: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_messages=True),
-        }
-        supervisor_role_id = guild_setting("supervisor_roles", guild.id)
-        if supervisor_role_id:
-            supervisor_role = guild.get_role(int(supervisor_role_id))
-            if supervisor_role:
-                overwrites[supervisor_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-        staff_role = discord.utils.find(lambda role: "staff team" in role.name.lower(), guild.roles)
-        if staff_role:
-            overwrites[staff_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-        for owner_id in config.get("extra_owners", {}).get(str(guild.id), []):
-            trusted_owner = guild.get_member(int(owner_id))
-            if trusted_owner:
-                overwrites[trusted_owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-        if OWNER_ID:
-            trusted_owner = guild.get_member(OWNER_ID)
-            if trusted_owner:
-                overwrites[trusted_owner] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-        category = discord.utils.get(guild.categories, name="Support Tickets")
-        if not category:
-            category = await guild.create_category("Support Tickets")
-        ticket_channel = await guild.create_text_channel(
-            name=channel_name,
-            category=category,
-            overwrites=overwrites,
-            topic=f"Shop redemption: {item_name} | {member} ({member.id})",
-        )
-
-        welcome = discord.Embed(
-            title=f"{EMOJIS['ticket']} Item Redemption",
-            description=f"Hi {member.mention}! Staff will review your redemption request. Keep this ticket open until they have given you **{item_name}**.",
-            color=discord.Color.blurple(),
-            timestamp=discord.utils.utcnow(),
-        )
-        apply_embed_theme(guild.id, welcome)
-        await ticket_channel.send(embed=welcome, view=TicketCloseView(), allowed_mentions=discord.AllowedMentions(users=[member]))
-
-        request_embed = discord.Embed(title="📌 Redemption to fulfill", color=discord.Color.gold())
-        request_embed.add_field(name="Item", value=f"{item_emoji} **{item_name}** (`{resolved_id}`)", inline=False)
-        request_embed.add_field(name="Requested by", value=f"{member.mention} · `{member.id}`", inline=False)
-        if item_description:
-            request_embed.add_field(name="Item details", value=item_description[:1024], inline=False)
-        request_embed.set_footer(text="Give the item to the member, then close this ticket.")
-        pinned_request = await ticket_channel.send(embed=request_embed, allowed_mentions=discord.AllowedMentions(users=[member]))
-        await pinned_request.pin(reason=f"Shop item redemption requested by {member} ({member.id})")
-
-        current_account = economy_account(guild.id, member.id)
-        current_owned = int(current_account["inventory"].get(resolved_id, 0))
-        if current_owned < 1:
-            await ticket_channel.delete(reason="Redemption inventory changed before ticket completion")
-            return await interaction.followup.send("Your inventory changed before the request completed. No item was redeemed; try again.", ephemeral=True)
-        current_account["inventory"][resolved_id] = current_owned - 1
-        if current_account["inventory"][resolved_id] <= 0:
-            current_account["inventory"].pop(resolved_id)
-        if not save_config():
-            current_account["inventory"][resolved_id] = current_owned
-            await ticket_channel.delete(reason="Could not persist redeemed inventory item")
-            return await interaction.followup.send("I couldn't save the redemption. Your item is still in your inventory; please try again later.", ephemeral=True)
-    except discord.Forbidden:
-        if ticket_channel:
-            try:
-                await ticket_channel.delete(reason="Could not complete item redemption ticket")
-            except discord.HTTPException:
-                pass
-        return await interaction.followup.send("I couldn't create and pin the request. Give Supreme Bot Manage Channels, Send Messages, Embed Links, Manage Messages, and View Channel permissions, then try again. Your item is still in your inventory.", ephemeral=True)
-    except discord.HTTPException:
-        if ticket_channel:
-            try:
-                await ticket_channel.delete(reason="Could not complete item redemption ticket")
-            except discord.HTTPException:
-                pass
-        return await interaction.followup.send("Discord couldn't finish creating your redemption ticket. Your item is still in your inventory; please try again.", ephemeral=True)
-
-    await audit(guild, f"Shop redemption ticket created for {member} ({member.id}): {item_name} [{resolved_id}] | {ticket_channel.name}")
-    await interaction.followup.send(f"Your {item_emoji} **{item_name}** redemption ticket is ready: {ticket_channel.mention}", ephemeral=True)
-
-
-@bot.command(name="coinflipbet")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def coinflipbet(ctx, choice: str, amount: int):
-    a=economy_account(ctx.guild.id,ctx.author.id); choice=choice.lower()
-    if choice not in {"heads","tails"} or not 1 <= amount <= min(a["balance"],100000): return await ctx.reply(embed=economy_embed("Use `coinflipbet heads|tails amount` and wager coins you have (up to 100,000)."))
-    result=random.choice(["heads","tails"]); win=(result==choice); delta=amount if win else -amount; a["balance"]+=delta
-    if win: a["stats"]["earned"]+=amount
-    else: a["stats"]["spent"]+=amount
-    save_config(); await ctx.reply(embed=economy_embed(f"The coin landed **{result}** — {'you win' if win else 'you lose'} **{amount:,}** coins!"))
-
-
-@bot.command(name="slots")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def slots(ctx, amount: int):
-    a=economy_account(ctx.guild.id,ctx.author.id)
-    if not 1 <= amount <= min(a["balance"],50000): return await ctx.reply(embed=economy_embed("Wager 1–50,000 coins you have."))
-    icons=["🍒","🍋","🔔","💎","👑"]; roll=[random.choice(icons) for _ in range(3)]
-    multiplier=8 if len(set(roll))==1 else 2 if len(set(roll))==2 else 0; change=amount*multiplier-amount
-    a["balance"]+=change
-    (a["stats"].__setitem__("earned",a["stats"].get("earned",0)+change) if change>0 else a["stats"].__setitem__("spent",a["stats"].get("spent",0)-change))
-    save_config(); await ctx.reply(embed=economy_embed(f"{' '.join(roll)}\n{'Jackpot!' if multiplier==8 else 'Nice!' if multiplier else 'No match'} Net: **{change:+,}** coins."))
-
-
-@bot.command(name="dice")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def dice(ctx, guess: int, amount: int):
-    a=economy_account(ctx.guild.id,ctx.author.id)
-    if not 1 <= guess <= 6 or not 1 <= amount <= min(a["balance"],50000): return await ctx.reply(embed=economy_embed("Use `dice <1-6> <wager>` with a wager you have."))
-    rolled=random.randint(1,6); change=amount*4 if rolled==guess else -amount; a["balance"]+=change
-    a["stats"]["earned"]+=max(0,change); a["stats"]["spent"]+=max(0,-change); save_config()
-    await ctx.reply(embed=economy_embed(f"You guessed **{guess}**; the die rolled **{rolled}**. Net: **{change:+,}** coins."))
-
-
-@bot.command(name="roulette")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def roulette(ctx, choice: str, amount: int):
-    a=economy_account(ctx.guild.id,ctx.author.id); choice=choice.lower(); result=random.randint(0,36)
-    if not 1 <= amount <= min(a["balance"],50000): return await ctx.reply(embed=economy_embed("Wager 1–50,000 coins you have."))
-    color="green" if result==0 else "red" if result%2 else "black"
-    if choice not in {"red", "black", "green"} and not (choice.isdigit() and 0 <= int(choice) <= 36): return await ctx.reply(embed=economy_embed("Choose red, black, green, or a number from 0 to 36."))
-    won=choice==color or (choice.isdigit() and int(choice)==result)
-    change=(amount*35 if choice.isdigit() and won else amount*35 if choice=="green" and won else amount if won else -amount)
-    a["balance"]+=change; a["stats"]["earned"]+=max(0,change); a["stats"]["spent"]+=max(0,-change); save_config()
-    await ctx.reply(embed=economy_embed(f"Wheel: **{result} {color}**. Net: **{change:+,}** coins."))
-
-
-@bot.command(name="lottery")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def lottery(ctx, amount: int = 100):
-    a=economy_account(ctx.guild.id,ctx.author.id)
-    if not 1<=amount<=min(a["balance"],100000): return await ctx.reply(embed=economy_embed("Ticket price must be 1–100,000 coins you have."))
-    wait=economy_cooldown_remaining(a,"lottery",86400,ctx)
-    if wait: return await ctx.reply(embed=economy_embed(f"Next lottery ticket available in **{wait // 3600}h**."))
-    a["balance"]-=amount; a["stats"]["spent"]+=amount; economy_mark_cooldown(a,"lottery")
-    if random.random()<.08:
-        reward=amount*10; economy_add(a,reward); result=f"Jackpot! Your **{amount:,}** coin ticket paid **{reward:,}** coins."
-    else: result=f"No win this time. Your **{amount:,}** coin ticket is used. Try again tomorrow."
-    save_config(); await ctx.reply(embed=economy_embed(result))
-
-@bot.command(name="scratch")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def scratch(ctx, amount: int = 50):
-    a=economy_account(ctx.guild.id,ctx.author.id)
-    if not 1<=amount<=min(a["balance"],50000): return await ctx.reply(embed=economy_embed("Scratch card price must be 1–50,000 coins you have."))
-    wait=economy_cooldown_remaining(a,"scratch",30,ctx)
-    if wait: return await ctx.reply(embed=economy_embed(f"Wait **{wait}s** before buying another scratch card."))
-    a["balance"]-=amount; a["stats"]["spent"]+=amount; economy_mark_cooldown(a,"scratch")
-    if random.random()<.45:
-        reward=random.randint(amount*2,amount*5); economy_add(a,reward); result=f"🎉 Scratch win! You paid **{amount:,}** and won **{reward:,}** coins."
-    else: result=f"No prize. Your scratch card cost **{amount:,}** coins."
-    save_config(); await ctx.reply(embed=economy_embed(result))
-
-@bot.command(name="quest")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def quest(ctx):
-    a=economy_account(ctx.guild.id,ctx.author.id); wait=economy_cooldown_remaining(a,"quest",86400,ctx)
-    if wait: return await ctx.reply(embed=economy_embed(f"Your next quest refreshes in **{wait // 3600}h**."))
-    reward=random.randint(180,400); economy_add(a,reward); economy_mark_cooldown(a,"quest"); save_config()
-    await ctx.reply(embed=economy_embed(f"Quest complete: **{random.choice(['help a neighbor','explore the plaza','deliver a mystery package','find a lucky charm'])}**. Reward: **{reward}** coins."))
-
-
-@bot.command(name="quests")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def quests(ctx):
-    await ctx.reply(embed=economy_embed("**Daily quests**\n• Complete `quest` once per day — earn 180–400 coins.\n• Claim `daily` and `weekly` for bonus rewards.\n• Try `fish`, `hunt`, `crime`, or `work` to earn more."))
-
-
-@bot.command(name="achievements")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def achievements(ctx):
-    a=economy_account(ctx.guild.id,ctx.author.id)
-    badges=[]
-    if a["stats"].get("earned",0)>=1000: badges.append("💰 Coin Collector")
-    if sum(a["inventory"].values())>=5: badges.append("🎒 Collector")
-    if a.get("daily_streak",0)>=7: badges.append("🔥 Week Streak")
-    await ctx.reply(embed=economy_embed("\n".join(badges) if badges else "No badges yet. Earn coins, shop, and keep your daily streak going!"))
-
-
-@bot.command(name="streak")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def streak(ctx, member: discord.Member = None):
-    member=member or ctx.author; a=economy_account(ctx.guild.id,member.id)
-    await ctx.reply(embed=economy_embed(f"**{member.display_name}** has a daily streak of **{a.get('daily_streak',0)}** days."))
-
-
-@bot.command(name="gift")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def gift(ctx, member: discord.Member, amount: int):
-    await pay.callback(ctx, member, amount)
-
-
-@bot.command(name="workstats")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def workstats(ctx, member: discord.Member = None):
-    member=member or ctx.author; a=economy_account(ctx.guild.id,member.id)
-    await ctx.reply(embed=economy_embed(f"**{member.display_name}** lifetime coins earned: **{a['stats'].get('earned',0):,}** · spent: **{a['stats'].get('spent',0):,}** · net worth: **{a['balance']+a['bank']:,}**."))
-
-
-@bot.command(name="setshopitem")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def setshopitem(ctx, item_id: str, price: int, emoji: str, *, name: str):
-    if not await require_economy_admin(ctx): return
-    items=refresh_shop_items(ctx.guild.id); item=economy_item(items,item_id)
-    if not 1 <= price <= 1000000000 or len(name)>80: return await ctx.reply(embed=economy_embed("Use a price from 1 to 1,000,000,000 and a name up to 80 characters."))
-    if item: item.update({"price":price,"emoji":emoji[:80],"name":name})
-    elif len(items)<100: items.append({"id":item_id.lower(),"name":name,"price":price,"emoji":emoji[:80],"description":""})
-    else: return await ctx.reply(embed=economy_embed("The shop is full (100 items)."))
-    config.setdefault("shop_items",{})[str(ctx.guild.id)]=items; save_config()
-    await ctx.reply(embed=economy_embed(f"Saved {emoji} **{name}** for **{price:,}** coins."))
-
-
-@bot.command(name="delshopitem", aliases=["shopremove"])
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def delshopitem(ctx, item_id: str):
-    if not await require_economy_admin(ctx): return
-    items=refresh_shop_items(ctx.guild.id); item=economy_item(items,item_id)
-    if not item: return await ctx.reply(embed=economy_embed("Shop item not found."))
-    items.remove(item); save_config(); await ctx.reply(embed=economy_embed(f"Removed **{item['name']}** from the shop."))
-
-
-@bot.command(name="setitemprice")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def setitemprice(ctx, item_id: str, price: int):
-    if not await require_economy_admin(ctx): return
-    item=economy_item(refresh_shop_items(ctx.guild.id),item_id)
-    if not item or not 1 <= price <= 1000000000: return await ctx.reply(embed=economy_embed("Item not found or price invalid."))
-    item["price"]=price; save_config(); await ctx.reply(embed=economy_embed(f"Updated **{item['name']}** to **{price:,}** coins."))
-
-
-@bot.command(name="setitememoji")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def setitememoji(ctx, item_id: str, emoji: str):
-    if not await require_economy_admin(ctx): return
-    item=economy_item(refresh_shop_items(ctx.guild.id),item_id)
-    if not item: return await ctx.reply(embed=economy_embed("Shop item not found."))
-    item["emoji"]=emoji[:80]; save_config(); await ctx.reply(embed=economy_embed(f"Updated emoji for **{item['name']}** to {emoji}."))
-
-
-@bot.command(name="clearinventory")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def clearinventory(ctx, member: discord.Member):
-    if not await require_economy_admin(ctx): return
-    a=economy_account(ctx.guild.id,member.id); a["inventory"].clear(); save_config()
-    await ctx.reply(embed=economy_embed(f"Cleared {member.mention}'s inventory."))
-
-
-@bot.command(name="addbank")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def addbank(ctx, member: discord.Member, amount: int):
-    if not await require_economy_admin(ctx): return
-    if not 1<=amount<=1000000000: return await ctx.reply(embed=economy_embed("Amount must be 1–1,000,000,000."))
-    a=economy_account(ctx.guild.id,member.id); a["bank"]+=amount; save_config(); await ctx.reply(embed=economy_embed(f"Added **{amount:,}** coins to {member.mention}'s bank."))
-
-
-@bot.command(name="removebank")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def removebank(ctx, member: discord.Member, amount: int):
-    if not await require_economy_admin(ctx): return
-    if not 1<=amount<=1000000000: return await ctx.reply(embed=economy_embed("Amount must be 1–1,000,000,000."))
-    a=economy_account(ctx.guild.id,member.id); removed=min(amount,a["bank"]); a["bank"]-=removed; save_config(); await ctx.reply(embed=economy_embed(f"Removed **{removed:,}** coins from {member.mention}'s bank."))
-
-
-@bot.command(name="resetbank")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def resetbank(ctx, member: discord.Member = None):
-    if not await require_economy_admin(ctx): return
-    accounts=config.setdefault("economy",{}).setdefault(str(ctx.guild.id),{})
-    if member: economy_account(ctx.guild.id,member.id)["bank"]=0; text=f"Reset {member.mention}'s bank."
-    else:
-        for user_id in list(accounts): economy_account(ctx.guild.id,user_id)["bank"]=0
-        text="Reset every bank in this server."
-    save_config(); await ctx.reply(embed=economy_embed(text))
-
-
-@bot.command(name="setdaily")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def setdaily(ctx, minimum: int, maximum: int):
-    if not await require_economy_admin(ctx): return
-    if not 0<=minimum<=maximum<=1000000: return await ctx.reply(embed=economy_embed("Use values from 0 to 1,000,000 with minimum ≤ maximum."))
-    settings=get_economy_settings(ctx.guild.id); settings.update({"daily_min":minimum,"daily_max":maximum}); config.setdefault("economy_settings",{})[str(ctx.guild.id)]=settings; save_config()
-    await ctx.reply(embed=economy_embed(f"Daily reward range set to **{minimum:,}–{maximum:,}** coins."))
-
-
-@bot.command(name="setwork")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def setwork(ctx, minimum: int, maximum: int):
-    if not await require_economy_admin(ctx): return
-    if not 0<=minimum<=maximum<=1000000: return await ctx.reply(embed=economy_embed("Use values from 0 to 1,000,000 with minimum ≤ maximum."))
-    settings=get_economy_settings(ctx.guild.id); settings.update({"work_min":minimum,"work_max":maximum}); config.setdefault("economy_settings",{})[str(ctx.guild.id)]=settings; save_config()
-    await ctx.reply(embed=economy_embed(f"Work reward range set to **{minimum:,}–{maximum:,}** coins."))
-
-
-@bot.command(name="setworkcooldown")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def setworkcooldown(ctx, seconds: int):
-    if not await require_economy_admin(ctx): return
-    if not 10<=seconds<=86400: return await ctx.reply(embed=economy_embed("Cooldown must be between 10 and 86,400 seconds."))
-    settings=get_economy_settings(ctx.guild.id); settings["work_cooldown"]=seconds; config.setdefault("economy_settings",{})[str(ctx.guild.id)]=settings; save_config()
-    await ctx.reply(embed=economy_embed(f"Work cooldown set to **{seconds} seconds**."))
-
-
-@bot.command(name="shopclear")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def shopclear(ctx):
-    if not await require_economy_admin(ctx): return
-    config.setdefault("shop_items",{})[str(ctx.guild.id)]=[]; save_config()
-    await ctx.reply(embed=economy_embed("Cleared the server shop."))
-
-
-@bot.command(name="iteminfo")
-@commands.guild_only()
-@commands.check(economy_command_guard)
-async def iteminfo(ctx, item_id: str):
-    item=economy_item(refresh_shop_items(ctx.guild.id),item_id)
-    if not item: return await ctx.reply(embed=economy_embed("Shop item not found."))
-    embed=discord.Embed(title=f"{item.get('emoji','🛍️')} {item['name']}",description=item.get('description') or "No description.",color=discord.Color.blurple())
-    embed.add_field(name="Item ID",value=f"`{item['id']}`"); embed.add_field(name="Price",value=f"{int(item['price']):,} coins")
-    await ctx.reply(embed=embed)
-
-@bot.command(name="kick")
-@commands.guild_only()
-async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
-    """Kicks a member (Staff capped at 3 per 24 hours)."""
-    if not user_is_staff(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
-        return
-
-    allowed, count = check_and_increment_action_limit(ctx, "kicks", limit=3)
-    if not allowed:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} You have reached your limit of **3 kicks per 24 hours**.", color=discord.Color.orange()))
-        return
-
-    try:
-        await member.kick(reason=f"{reason} (Kicked by {ctx.author})")
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Kicked {member.mention} | Reason: {reason}", color=discord.Color.orange()))
-        await audit(ctx.guild, f"Member kicked: {member} ({member.id}) | Reason: {reason} | By: {ctx.author}")
-    except discord.Forbidden:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} I lack permissions to kick that member.", color=discord.Color.red()))
-
-
-@bot.command(name="ban")
-@commands.guild_only()
-async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
-    """Bans a member (Staff capped at 3 per 24 hours)."""
-    if not user_is_staff(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
-        return
-
-    allowed, count = check_and_increment_action_limit(ctx, "bans", limit=3)
-    if not allowed:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} You have reached your limit of **3 bans per 24 hours**.", color=discord.Color.orange()))
-        return
-
-    try:
-        await member.ban(reason=f"{reason} (Banned by {ctx.author})")
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Banned {member.mention} | Reason: {reason}", color=discord.Color.red()))
-        await audit(ctx.guild, f"Member banned: {member} ({member.id}) | Reason: {reason} | By: {ctx.author}")
-    except discord.Forbidden:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} I lack permissions to ban that member.", color=discord.Color.red()))
-
-
-@bot.command(name="clear")
-@commands.guild_only()
-async def clear(ctx, amount: int = 5):
-    """Purges messages."""
-    if not user_is_staff(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
-        return
-
-    await ctx.channel.purge(limit=amount + 1)
-    msg = await ctx.send(embed=discord.Embed(description=f"{EMOJIS['success']} Cleared {amount} messages.", color=discord.Color.green()))
-    await msg.delete(delay=3)
-
-
-@bot.command(name="mute")
-@commands.guild_only()
-async def mute(ctx, member: discord.Member, *, reason="No reason provided"):
-    """Timeouts a member."""
-    if not user_is_staff(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
-        return
-
-    from datetime import timedelta
-    try:
-        await member.timeout(timedelta(minutes=10), reason=f"{reason} (Muted by {ctx.author})")
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Timed out {member.mention} for 10 minutes.", color=discord.Color.orange()))
-        await audit(ctx.guild, f"Member timed out: {member} ({member.id}) | Reason: {reason} | By: {ctx.author}")
-    except discord.Forbidden:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} I lack permissions to timeout that member.", color=discord.Color.red()))
-
-
-# =========================
-# UTILITY & INFO COMMANDS
+# GENERAL / MOD COMMANDS
 # =========================
 
 @bot.command(name="ping")
 @commands.guild_only()
 async def ping(ctx):
-    """Shows bot latency."""
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Pong! Latency: `{round(bot.latency * 1000)}ms`", color=discord.Color.blue()))
 
 
 @bot.command(name="serverinfo")
 @commands.guild_only()
 async def serverinfo(ctx):
-    """Shows server info."""
     g = ctx.guild
     embed = discord.Embed(title=f"{EMOJIS['gear']} {g.name} Information", color=discord.Color.blurple())
-    embed.add_field(name=f"{EMOJIS['user']} Owner", value=g.owner, inline=True)
-    embed.add_field(name=f"{EMOJIS['ladder']} Members", value=g.member_count, inline=True)
-    embed.add_field(name=f"{EMOJIS['success']} Created On", value=g.created_at.strftime("%Y-%m-%d"), inline=True)
+    embed.add_field(name="Owner", value=g.owner, inline=True)
+    embed.add_field(name="Members", value=g.member_count, inline=True)
     await ctx.reply(embed=embed)
 
 
 @bot.command(name="userinfo")
 @commands.guild_only()
 async def userinfo(ctx, member: discord.Member = None):
-    """Shows user info."""
     m = member or ctx.author
     embed = discord.Embed(title=f"{EMOJIS['user']} {m} Info", color=m.color)
     embed.set_thumbnail(url=m.display_avatar.url)
     embed.add_field(name="ID", value=m.id, inline=True)
-    embed.add_field(name="Joined", value=m.joined_at.strftime("%Y-%m-%d") if m.joined_at else "N/A", inline=True)
     await ctx.reply(embed=embed)
 
 
 @bot.command(name="avatar")
 @commands.guild_only()
 async def avatar(ctx, member: discord.Member = None):
-    """Shows user avatar."""
     m = member or ctx.author
-    embed = discord.Embed(title=f"{EMOJIS['user']} Avatar for {m}", color=discord.Color.blurple())
+    embed = discord.Embed(title=f"Avatar for {m}", color=discord.Color.blurple())
     embed.set_image(url=m.display_avatar.url)
     await ctx.reply(embed=embed)
 
 
-# =========================
-# FUN & MISC COMMANDS
-# =========================
-
-@bot.command(name="coinflip")
-async def coinflip(ctx):
-    """Flips a coin."""
-    result = random.choice(["Heads", "Tails"])
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} The coin landed on: **{result}**", color=discord.Color.gold()))
-
-
-@bot.command(name="roll")
-async def roll(ctx):
-    """Rolls a dice (1-6)."""
-    result = random.randint(1, 6)
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} You rolled a **{result}**!", color=discord.Color.gold()))
-
-
-# =========================
-# SETUP COMMANDS (RANKS ADD / CLEAR)
-# =========================
-
-@bot.group(invoke_without_command=True)
+@bot.command(name="kick")
 @commands.guild_only()
-async def ranks(ctx):
-    """Shows current rank ladder configuration."""
-    if not user_is_owner(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
-        return
-
-    ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id), [])
-    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else f"Not configured. Use `{get_server_prefix(ctx.guild.id)}ranks add @role`"
-    
-    embed = discord.Embed(
-        title=f"{EMOJIS['ladder']} Staff Rank Ladder",
-        description=f"**Current Order (Lowest to Highest):**\n{ladder_str}",
-        color=discord.Color.blurple()
-    )
-    await ctx.reply(embed=embed)
+async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
+    if not user_is_staff(ctx): return
+    await member.kick(reason=reason)
+    await ctx.reply(embed=discord.Embed(description=f"Kicked {member.mention}", color=discord.Color.orange()))
 
 
-@ranks.command(name="add")
+@bot.command(name="ban")
 @commands.guild_only()
-async def ranks_add(ctx, role: discord.Role):
-    """Adds a role to the rank ladder sequence (lowest to highest)."""
-    if not user_is_owner(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
-        return
-
-    if role.is_default() or role.managed:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} You cannot add that role to the ladder.", color=discord.Color.orange()))
-        return
-
-    guild_id = str(ctx.guild.id)
-    if "rank_ladders" not in config:
-        config["rank_ladders"] = {}
-    if guild_id not in config["rank_ladders"]:
-        config["rank_ladders"][guild_id] = []
-
-    if role.id in config["rank_ladders"][guild_id]:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} That role is already in the rank ladder.", color=discord.Color.orange()))
-        return
-
-    config["rank_ladders"][guild_id].append(role.id)
-    save_config()
-
-    ladder = config["rank_ladders"][guild_id]
-    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder])
-
-    embed = discord.Embed(
-        title=f"{EMOJIS['success']} Rank Added to Ladder",
-        description=f"Added {role.mention} successfully!\n\n**Current Ladder:**\n{ladder_str}",
-        color=discord.Color.green()
-    )
-    await ctx.reply(embed=embed)
+async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
+    if not user_is_staff(ctx): return
+    await member.ban(reason=reason)
+    await ctx.reply(embed=discord.Embed(description=f"Banned {member.mention}", color=discord.Color.red()))
 
 
-@ranks.command(name="clear")
+@bot.command(name="clear")
 @commands.guild_only()
-async def ranks_clear(ctx):
-    """Clears the entire rank ladder configuration."""
-    if not user_is_owner(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
-        return
-
-    guild_id = str(ctx.guild.id)
-    if "rank_ladders" in config and guild_id in config["rank_ladders"]:
-        config["rank_ladders"][guild_id] = []
-        save_config()
-
-    embed = discord.Embed(
-        title=f"{EMOJIS['success']} Rank Ladder Cleared",
-        description="The rank ladder sequence has been reset.",
-        color=discord.Color.red()
-    )
-    await ctx.reply(embed=embed)
+async def clear(ctx, amount: int = 5):
+    if not user_is_staff(ctx): return
+    await ctx.channel.purge(limit=amount + 1)
 
 
-@bot.command(name="setstaffsupervisor")
+@bot.command(name="mute")
 @commands.guild_only()
-async def setstaffsupervisor(ctx, assigned_role: discord.Role):
-    if not user_is_owner(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
-        return
-
-    config["supervisor_roles"][str(ctx.guild.id)] = assigned_role.id
-    save_config()
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Supervisor role set to {assigned_role.mention}.", color=discord.Color.green()))
-
-
-@bot.command(name="setpromodemo")
-@commands.guild_only()
-async def setpromodemo(ctx, channel: discord.TextChannel):
-    if not user_is_owner(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
-        return
-
-    config["promodemo_channels"][str(ctx.guild.id)] = channel.id
-    save_config()
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Promo channel set to {channel.mention}.", color=discord.Color.green()))
-
-
-@bot.command(name="setaudit")
-@commands.guild_only()
-async def setaudit(ctx, channel: discord.TextChannel):
-    if not user_is_owner(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
-        return
-
-    config["audit_channels"][str(ctx.guild.id)] = channel.id
-    save_config()
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Audit channel set to {channel.mention}.", color=discord.Color.green()))
-
-
-@bot.command(name="staffsettings")
-@commands.guild_only()
-async def staffsettings(ctx):
-    """Displays current server staff configurations and rank ladder."""
-    if not user_is_supervisor(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to view staff settings.", color=discord.Color.red()))
-        return
-
-    supervisor_id = guild_setting("supervisor_roles", ctx.guild.id)
-    promo_id = guild_setting("promodemo_channels", ctx.guild.id)
-    audit_id = guild_setting("audit_channels", ctx.guild.id)
-    ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id), [])
-
-    supervisor = ctx.guild.get_role(int(supervisor_id)) if supervisor_id else None
-    promo_channel = ctx.guild.get_channel(int(promo_id)) if promo_id else None
-    audit_channel = ctx.guild.get_channel(int(audit_id)) if audit_id else None
-    
-    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else f"Not configured (`{get_server_prefix(ctx.guild.id)}ranks add @role`)"
-
-    embed = discord.Embed(
-        title=f"{EMOJIS['gear']} Supreme • Server Settings",
-        color=discord.Color.blurple(),
-        timestamp=discord.utils.utcnow()
-    )
-
-    embed.add_field(
-        name=f"{EMOJIS['shield']} Supervisor Role",
-        value=supervisor.mention if supervisor else f"Not configured (`{get_server_prefix(ctx.guild.id)}setstaffsupervisor @role`)",
-        inline=False
-    )
-    embed.add_field(
-        name=f"{EMOJIS['announcement']} Announcement Channel",
-        value=promo_channel.mention if promo_channel else f"Not configured (`{get_server_prefix(ctx.guild.id)}setpromodemo #channel`)",
-        inline=False
-    )
-    embed.add_field(
-        name=f"{EMOJIS['audit']} Audit Log Channel",
-        value=audit_channel.mention if audit_channel else f"Not configured (`{get_server_prefix(ctx.guild.id)}setaudit #channel`)",
-        inline=False
-    )
-    embed.add_field(
-        name=f"{EMOJIS['ladder']} Rank Ladder Sequence",
-        value=ladder_str,
-        inline=False
-    )
-    embed.add_field(
-        name=f"{EMOJIS['warning']} Staff Daily Quota",
-        value="Max **3 Kicks / 3 Bans per 24 hours** for Staff Members",
-        inline=False
-    )
-
-    embed.set_footer(text=f"{ctx.guild.name} • Configuration Dashboard", icon_url=ctx.guild.icon.url if ctx.guild.icon else None)
-    await ctx.reply(embed=embed)
+async def mute(ctx, member: discord.Member, *, reason="No reason provided"):
+    if not user_is_staff(ctx): return
+    from datetime import timedelta
+    await member.timeout(timedelta(minutes=10), reason=reason)
+    await ctx.reply(embed=discord.Embed(description=f"Timed out {member.mention}", color=discord.Color.orange()))
 
 
 # =========================
-# HELP COMMAND
-# =========================
-
-# =========================
-# EXTRA OWNER & BOT ACTIVITY COMMANDS
-# =========================
-
-@bot.command(name="addextraowner")
-@commands.guild_only()
-async def addextraowner(ctx, member: discord.Member):
-    """Give a member owner-level bot permissions in this server."""
-    if not (ctx.author.id == OWNER_ID or ctx.author.id == ctx.guild.owner_id):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can add extra owners.", color=discord.Color.red()))
-        return
-    if member.bot:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Bots cannot be added as extra owners.", color=discord.Color.orange()))
-        return
-    owners = config.setdefault("extra_owners", {}).setdefault(str(ctx.guild.id), [])
-    if str(member.id) in {str(uid) for uid in owners}:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {member.mention} is already an extra owner.", color=discord.Color.orange()))
-        return
-    owners.append(str(member.id))
-    save_config()
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Added {member.mention} as an extra owner for this server.", color=discord.Color.green()))
-
-
-@bot.command(name="removextraowner", aliases=["removeextraowner"])
-@commands.guild_only()
-async def removextraowner(ctx, member: discord.Member):
-    """Remove a member's owner-level bot permissions in this server."""
-    if not (ctx.author.id == OWNER_ID or ctx.author.id == ctx.guild.owner_id):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can remove extra owners.", color=discord.Color.red()))
-        return
-    owners = config.setdefault("extra_owners", {}).setdefault(str(ctx.guild.id), [])
-    if str(member.id) not in {str(uid) for uid in owners}:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {member.mention} is not an extra owner.", color=discord.Color.orange()))
-        return
-    config["extra_owners"][str(ctx.guild.id)] = [str(uid) for uid in owners if str(uid) != str(member.id)]
-    save_config()
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Removed {member.mention} from the extra owners.", color=discord.Color.green()))
-
-
-ACTIVITY_TYPES = {
-    "playing": discord.ActivityType.playing,
-    "listening": discord.ActivityType.listening,
-    "watching": discord.ActivityType.watching,
-    "competing": discord.ActivityType.competing,
-    "streaming": discord.ActivityType.streaming,
-}
-
-
-async def apply_bot_activity(activity_type, text):
-    if activity_type == "playing":
-        activity = discord.Game(name=text)
-    elif activity_type == "streaming":
-        activity = discord.Streaming(name=text, url="https://www.twitch.tv/")
-    else:
-        activity = discord.Activity(type=ACTIVITY_TYPES[activity_type], name=text)
-    await bot.change_presence(activity=activity, status=discord.Status.online)
-
-
-@bot.command(name="setactivity")
-@commands.guild_only()
-async def setactivity(ctx, activity: str, *, text: str):
-    """Set the bot's global status, for example >setactivity playing Supreme Bot."""
-    if not user_is_owner(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to change the bot activity.", color=discord.Color.red()))
-        return
-    activity = activity.lower()
-    if activity not in ACTIVITY_TYPES:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Activity must be playing, streaming, listening, watching, or competing.", color=discord.Color.orange()))
-        return
-    text = text.strip()
-    if not text or len(text) > 128:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Activity text must be between 1 and 128 characters.", color=discord.Color.orange()))
-        return
-    try:
-        await apply_bot_activity(activity, text)
-        config["activity"] = {"type": activity, "text": text}
-        save_config()
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Bot activity set to **{activity.title()} {text}**.", color=discord.Color.green()))
-    except discord.HTTPException as exc:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Discord couldn't update that activity: `{exc}`", color=discord.Color.red()))
-
-import os
-import aiohttp
-import asyncio
-import time
-import discord
-
-# =========================
-# HUGGING FACE AI CONFIG
+# HUGGING FACE AI INTEGRATION
 # =========================
 
 HF_API_KEY = os.getenv("HUGGINGFACE_API_KEY", "").strip()
-# Using a powerful, free-tier accessible instruction model via Hugging Face router
 HF_MODEL = os.getenv("HUGGINGFACE_MODEL", "meta-llama/Llama-3.3-70B-Instruct").strip()
 AI_HISTORY = {}
 AI_LAST_REQUEST = {}
 
 async def call_ai(guild_id, user_id, prompt):
-    """Send a conversation request to Hugging Face's serverless Inference API."""
     if not HF_API_KEY:
-        raise RuntimeError("AI is not configured yet. Set HUGGINGFACE_API_KEY in the hosting environment.")
+        raise RuntimeError("AI is not configured yet. Set HUGGINGFACE_API_KEY in the hosting environment variables.")
     
     history_key = (int(guild_id), int(user_id))
-    history = AI_HISTORY.get(history_key, [])[-6:]  # Keep last 6 turns for context
+    history = AI_HISTORY.get(history_key, [])[-6:]
     
-    # Format messages for Llama/OpenAI-compatible chat completions endpoint on Hugging Face
     messages = [
-        {"role": "system", "content": "You are Supreme Bot AI, a friendly, helpful AI assistant chatting in a Discord server. Keep responses structured, concise, and easy to read. Use code blocks for code snippets."}
+        {"role": "system", "content": "You are Supreme Bot AI, a friendly, helpful AI assistant chatting in a Discord server. Keep responses concise, structured, and helpful."}
     ]
-    for turn in history:
-        messages.append(turn)
+    for turn in history: messages.append(turn)
     messages.append({"role": "user", "content": prompt})
 
-    payload = {
-        "model": HF_MODEL,
-        "messages": messages,
-        "max_tokens": 500,
-        "temperature": 0.7
-    }
-
-    headers = {
-        "Authorization": f"Bearer {HF_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    payload = {"model": HF_MODEL, "messages": messages, "max_tokens": 500, "temperature": 0.7}
+    headers = {"Authorization": f"Bearer {HF_API_KEY}", "Content-Type": "application/json"}
 
     timeout = aiohttp.ClientTimeout(total=45)
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.post(
-            "https://router.huggingface.co/v1/chat/completions",
-            headers=headers,
-            json=payload
-        ) as response:
+        async with session.post("https://router.huggingface.co/v1/chat/completions", headers=headers, json=payload) as response:
             if response.status >= 400:
-                body = await response.text()
-                if response.status == 401:
-                    raise RuntimeError("The Hugging Face token was rejected. Check your HUGGINGFACE_API_KEY secret.")
-                if response.status == 429:
-                    raise RuntimeError("The Hugging Face rate limit was reached or model is loading. Try again shortly.")
+                if response.status == 401: raise RuntimeError("Hugging Face API key was rejected. Check your token.")
+                if response.status == 429: raise RuntimeError("Hugging Face rate limit reached or model loading. Try again shortly.")
                 raise RuntimeError("The AI service returned an error. Try again later.")
-            
             data = await response.json()
 
-    try:
-        answer = data["choices"][0]["message"]["content"].strip()
-    except (KeyError, IndexError):
-        raise RuntimeError("The AI returned an unexpected response format. Please try again.")
+    try: answer = data["choices"][0]["message"]["content"].strip()
+    except (KeyError, IndexError): raise RuntimeError("Unexpected AI response format.")
 
-    if not answer:
-        raise RuntimeError("The AI returned an empty reply. Please try again.")
-
-    # Update history
-    AI_HISTORY[history_key] = history + [
-        {"role": "user", "content": prompt},
-        {"role": "assistant", "content": answer}
-    ]
-    
+    AI_HISTORY[history_key] = history + [{"role": "user", "content": prompt}, {"role": "assistant", "content": answer}]
     return answer
 
-# =========================
-# COMMANDS
-# =========================
 
-@bot.command(name="ask", aliases=["ai", "chat"])
+@bot.command(name="ask")
 @commands.guild_only()
 async def ask_ai(ctx, *, prompt: str):
-    """Chat with Supreme Bot AI using Hugging Face."""
+    """Chat with Hugging Face AI."""
     prompt = prompt.strip()
-    if not prompt:
-        return await ctx.reply("Ask me something after the command, for example: `>ask explain how a computer works`", mention_author=False)
-    if len(prompt) > 2000:
-        return await ctx.reply("Please keep each message under 2,000 characters.", mention_author=False)
+    if not prompt: return await ctx.reply("Ask me something, e.g. `>ask how do black holes work`", mention_author=False)
     
     key = (ctx.guild.id, ctx.author.id)
     now = time.monotonic()
     wait = 4 - (now - AI_LAST_REQUEST.get(key, 0))
-    if wait > 0:
-        return await ctx.reply(f"Give me {wait:.1f} seconds before your next AI message.", mention_author=False)
+    if wait > 0: return await ctx.reply(f"Please wait {wait:.1f}s before your next message.", mention_author=False)
     AI_LAST_REQUEST[key] = now
 
     async with ctx.typing():
-        try:
-            answer = await call_ai(ctx.guild.id, ctx.author.id, prompt)
-        except (aiohttp.ClientError, asyncio.TimeoutError):
-            return await ctx.reply("I couldn't reach the Hugging Face AI service. Try again in a moment.", mention_author=False)
-        except RuntimeError as exc:
-            return await ctx.reply(str(exc), mention_author=False)
+        try: answer = await call_ai(ctx.guild.id, ctx.author.id, prompt)
+        except Exception as exc: return await ctx.reply(str(exc), mention_author=False)
 
-    # Chunk long responses to fit Discord's 2,000 character limit
     for start in range(0, len(answer), 1900):
         await ctx.reply(answer[start:start + 1900], mention_author=False, allowed_mentions=discord.AllowedMentions.none())
 
@@ -2643,326 +954,30 @@ async def ask_ai(ctx, *, prompt: str):
 @bot.command(name="clearai", aliases=["resetai"])
 @commands.guild_only()
 async def clear_ai_history(ctx):
-    """Clear your Hugging Face AI conversation memory in this server."""
+    """Clear your AI conversation history."""
     AI_HISTORY.pop((ctx.guild.id, ctx.author.id), None)
     await ctx.reply("Your AI chat history has been cleared.", mention_author=False)
-    
+
+
+@bot.command(name="dashboard")
+async def dashboard_cmd(ctx):
+    embed = discord.Embed(title="Supreme Bot Dashboard", url=DASHBOARD_URL, description=f"Open the [dashboard]({DASHBOARD_URL}) to configure your server.", color=discord.Color.blurple())
+    await ctx.reply(embed=embed, mention_author=False)
+
+
 @bot.command(name="help")
 async def help_command(ctx):
     prefix = get_server_prefix(ctx.guild.id if ctx.guild else None)
-    embed = discord.Embed(title=f"{EMOJIS['gear']} Supreme • Command Center", description=f"Full command list • Prefix varies by server. Economy commands only work in <#{ECONOMY_CHANNEL_ID}>.", color=discord.Color.blurple())
-    embed.add_field(name=f"{EMOJIS['money']} Economy · Wallet & rewards", value=f"`{prefix}balance [@member]`, `{prefix}bank [@member]`, `{prefix}deposit <amount|all>`, `{prefix}withdraw <amount|all>`, `{prefix}daily`, `{prefix}weekly`, `{prefix}monthly`, `{prefix}work`, `{prefix}beg`, `{prefix}fish`, `{prefix}hunt`, `{prefix}crime`, `{prefix}rob @member`, `{prefix}pay @member amount`, `{prefix}gift @member amount`, `{prefix}leaderboard`, `{prefix}profile [@member]`, `{prefix}streak [@member]`, `{prefix}workstats [@member]`", inline=False)
-    embed.add_field(name=f"{EMOJIS['success']} Economy · Games & goals", value=f"`{prefix}coinflipbet <heads|tails> amount`, `{prefix}slots amount`, `{prefix}dice <1-6> amount`, `{prefix}roulette <red|black|green|0-36> amount`, `{prefix}lottery [ticket-price]`, `{prefix}scratch [ticket-price]`, `{prefix}quest`, `{prefix}quests`, `{prefix}achievements`", inline=False)
-    embed.add_field(name="🛍️ Economy · Shop", value=f"`{prefix}shop`, `{prefix}buy <item-id> [quantity]` adds items to your inventory, `{prefix}sell <item-id> [quantity]`, `{prefix}inventory [@member]`, `{prefix}use <item-id>`, `/withdraw` opens a private, pinned fulfillment ticket for one owned item, `{prefix}iteminfo <item-id>`", inline=False)
-    embed.add_field(name=f"{EMOJIS['shield']} Economy · Manager tools", value=f"`{prefix}addmoney @member|all amount`, `{prefix}removemoney @member amount`, `{prefix}setmoney @member amount`, `{prefix}resetmoney [@member]`, `{prefix}reseteconomy all`, `{prefix}nocooldown @member`, `{prefix}removenocooldown @member`, `{prefix}addbank @member amount`, `{prefix}removebank @member amount`, `{prefix}resetbank [@member]`, `{prefix}setdaily min max`, `{prefix}setwork min max`, `{prefix}setworkcooldown seconds`, `{prefix}setshopitem id price emoji name`, `{prefix}delshopitem id`, `{prefix}setitemprice id price`, `{prefix}setitememoji id emoji`, `{prefix}clearinventory @member`, `{prefix}shopclear`", inline=False)
-    embed.add_field(name=f"{EMOJIS['shield']} Staff & Moderation", value=f"`{prefix}promo`, `{prefix}demo`, `{prefix}super`, `{prefix}superintro`, `{prefix}staffintro`, `{prefix}staff`, `{prefix}role`, `{prefix}steal`, `{prefix}kick`, `{prefix}ban`, `{prefix}clear`, `{prefix}mute`", inline=False)
-    embed.add_field(name=f"{EMOJIS['ticket']} Setup & Utility", value=f"`{prefix}dashboard`, `{prefix}ticketsetup`, `{prefix}ranks add @role`, `{prefix}ranks clear`, `{prefix}setstaffsupervisor`, `{prefix}setpromodemo`, `{prefix}setaudit`, `{prefix}staffsettings`, `{prefix}addextraowner @member`, `{prefix}removextraowner @member`, `{prefix}setactivity <type> <text>`, `{prefix}ping`, `{prefix}serverinfo`, `{prefix}userinfo`, `{prefix}avatar`, `{prefix}coinflip`, `{prefix}roll`", inline=False)
-    embed.add_field(name="🤖 AI Chat & Tasks", value=f"Chat normally in the channel set with `{prefix}setaichannel #channel`; `{prefix}setaichannel off` disables it. Also: `{prefix}ask <message>` (aliases: `{prefix}ai`, `{prefix}chat`), `{prefix}clearai`, `{prefix}task <description>`, `{prefix}assign @member <task>` (supervisors), `{prefix}tasks [@member]`, `{prefix}done <task-id>`", inline=False)
-    embed.add_field(name="🛡️ Server & Bot Controls", value=f"`{prefix}blacklist @member [reason]`, `{prefix}unblacklist @member`, `{prefix}disable`, `{prefix}enable`, `{prefix}shutdown`, `{prefix}restart`", inline=False)
+    embed = discord.Embed(title="Supreme Bot • Help", description=f"Prefix: `{prefix}`", color=discord.Color.blurple())
+    embed.add_field(name="🤖 AI Commands", value=f"`{prefix}ask <prompt>`, `{prefix}clearai`", inline=False)
+    embed.add_field(name="🛡️ Moderation", value=f"`{prefix}kick`, `{prefix}ban`, `{prefix}mute`, `{prefix}clear`", inline=False)
     await ctx.reply(embed=embed, mention_author=False)
 
-
-@bot.command(name="blacklist")
-@commands.guild_only()
-async def blacklist_member(ctx, member: discord.Member, *, reason: str = "No reason provided"):
-    """Block a member from using Supreme Bot commands in this server."""
-    if not user_is_supervisor(ctx):
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only server owners, extra owners, or supervisors can blacklist members.", color=discord.Color.red()))
-    protected_ids = {str(ctx.guild.owner_id), str(OWNER_ID)}
-    protected_ids.update(str(uid) for uid in config.get("extra_owners", {}).get(str(ctx.guild.id), []))
-    if str(member.id) in protected_ids:
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Bot owners and trusted owners cannot be blacklisted.", color=discord.Color.orange()))
-    if member.bot:
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Bots cannot be blacklisted.", color=discord.Color.orange()))
-    denied = config.setdefault("blacklists", {}).setdefault(str(ctx.guild.id), [])
-    if str(member.id) in {str(uid) for uid in denied}:
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {member.mention} is already blacklisted.", color=discord.Color.orange()))
-    denied.append(str(member.id))
-    if not save_config():
-        denied.remove(str(member.id))
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Could not save the blacklist. Try again.", color=discord.Color.red()))
-    reason = reason[:300]
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} {member.mention} is now blocked from using Supreme Bot commands in this server. Reason: {reason}", color=discord.Color.green()))
-
-
-@bot.command(name="unblacklist", aliases=["pardon"])
-@commands.guild_only()
-async def unblacklist_member(ctx, member: discord.Member):
-    """Restore a member's access to Supreme Bot commands in this server."""
-    if not user_is_supervisor(ctx):
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only server owners, extra owners, or supervisors can remove a blacklist.", color=discord.Color.red()))
-    guild_id = str(ctx.guild.id)
-    denied = config.setdefault("blacklists", {}).setdefault(guild_id, [])
-    if str(member.id) not in {str(uid) for uid in denied}:
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {member.mention} is not blacklisted.", color=discord.Color.orange()))
-    previous = list(denied)
-    config["blacklists"][guild_id] = [str(uid) for uid in denied if str(uid) != str(member.id)]
-    if not save_config():
-        config["blacklists"][guild_id] = previous
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Could not save the blacklist change. Try again.", color=discord.Color.red()))
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} {member.mention} can use Supreme Bot commands again.", color=discord.Color.green()))
-
-
-@bot.command(name="disable")
-@commands.guild_only()
-async def disable_bot(ctx):
-    """Disable regular bot commands in this server."""
-    if not user_is_owner(ctx):
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner, server owner, or extra owners can disable the bot here.", color=discord.Color.red()))
-    guild_id = str(ctx.guild.id)
-    previous = config.setdefault("disabled_guilds", {}).get(guild_id)
-    config["disabled_guilds"][guild_id] = True
-    if not save_config():
-        if previous is None:
-            config["disabled_guilds"].pop(guild_id, None)
-        else:
-            config["disabled_guilds"][guild_id] = previous
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Could not save this setting. Try again.", color=discord.Color.red()))
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Regular commands are disabled for this server. Use `{get_server_prefix(ctx.guild.id)}enable` to turn them back on.", color=discord.Color.orange()))
-
-
-@bot.command(name="enable")
-@commands.guild_only()
-async def enable_bot(ctx):
-    """Enable bot commands in this server."""
-    if not user_is_owner(ctx):
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner, server owner, or extra owners can enable the bot here.", color=discord.Color.red()))
-    guild_id = str(ctx.guild.id)
-    previous = config.setdefault("disabled_guilds", {}).pop(guild_id, None)
-    if not save_config():
-        if previous is not None:
-            config["disabled_guilds"][guild_id] = previous
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Could not save this setting. Try again.", color=discord.Color.red()))
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Bot commands are enabled again in this server.", color=discord.Color.green()))
-
-
-@bot.command(name="shutdown")
-async def shutdown_bot(ctx):
-    """Stop the bot process. Bot owner only."""
-    if not OWNER_ID or ctx.author.id != OWNER_ID:
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the configured bot owner can shut down the bot.", color=discord.Color.red()))
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Supreme Bot is shutting down.", color=discord.Color.orange()))
-    await bot.close()
-
-
-@bot.command(name="restart")
-async def restart_bot(ctx):
-    """Restart the bot process. Bot owner only."""
-    if not OWNER_ID or ctx.author.id != OWNER_ID:
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the configured bot owner can restart the bot.", color=discord.Color.red()))
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Supreme Bot is restarting.", color=discord.Color.green()))
-    await asyncio.sleep(1)
-    os.execv(sys.executable, [sys.executable] + sys.argv)
-
-@bot.command(name="dashboard")
-async def dashboard(ctx):
-    """Send the Supreme Bot dashboard link."""
-    embed = discord.Embed(
-        title="Supreme Bot Dashboard",
-        url=DASHBOARD_URL,
-        description=f"Open the [dashboard]({DASHBOARD_URL}) to manage your server settings, ticket panel, embeds, and economy.",
-        color=discord.Color.blurple(),
-    )
-    embed.set_footer(text="Sign in with Discord to continue")
-    await ctx.reply(embed=embed, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-
-# =========================
-# GAY LIST COMMANDS
-# =========================
-
-def get_gay_list(guild_id):
-    """Retrieves or initializes the gay list for a specific guild."""
-    if "gay_list" not in config:
-        config["gay_list"] = {}
-    return config["gay_list"].setdefault(str(guild_id), [])
-
-@bot.command(name="gay")
-@commands.guild_only()
-async def gay_list_cmd(ctx):
-    """Shows the list of added members."""
-    guild_id = str(ctx.guild.id)
-    members_list = get_gay_list(guild_id)
-    
-    if not members_list:
-        await ctx.reply(embed=discord.Embed(description="🏳️‍🌈 The list is currently empty. Use `>addgay @member` to add someone.", color=discord.Color.blurple()))
-        return
-        
-    mentions = [f"<@&{uid}>" if not str(uid).isdigit() else f"<@{uid}>" for uid in members_list]
-    # Let's ensure they are formatted nicely as member mentions:
-    formatted_mentions = []
-    for uid in members_list:
-        member = ctx.guild.get_member(int(uid))
-        formatted_mentions.append(member.mention if member else f"`ID: {uid}`")
-
-    embed = discord.Embed(
-        title="🏳️‍🌈 Gay List (also known as bart list)",
-        description="\n".join(formatted_mentions),
-        color=discord.Color.magenta(),
-        timestamp=discord.utils.utcnow()
-    )
-    embed.set_footer(text=f"Requested by {ctx.author.display_name}")
-    await ctx.reply(embed=embed, mention_author=False)
-
-@bot.command(name="addgay")
-@commands.guild_only()
-async def add_gay_cmd(ctx, member: discord.Member):
-    """Adds a member to the list (Supervisor/Owner only)."""
-    if not user_is_supervisor(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
-        return
-
-    guild_id = str(ctx.guild.id)
-    members_list = get_gay_list(guild_id)
-    
-    if str(member.id) in members_list:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {member.mention} is already on the list!", color=discord.Color.orange()))
-        return
-
-    members_list.append(str(member.id))
-    save_config()
-    
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Added {member.mention} to the list!", color=discord.Color.green()))
-    await audit(ctx.guild, f"Member {member} ({member.id}) added to gay list by {ctx.author}")
-
-@bot.command(name="removegay")
-@commands.guild_only()
-async def remove_gay_cmd(ctx, member: discord.Member):
-    """Removes a member from the list (Supervisor/Owner only)."""
-    if not user_is_supervisor(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
-        return
-
-    guild_id = str(ctx.guild.id)
-    members_list = get_gay_list(guild_id)
-    
-    if str(member.id) not in members_list:
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} {member.mention} is not on the list.", color=discord.Color.orange()))
-        return
-
-    members_list.remove(str(member.id))
-    save_config()
-    
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Removed {member.mention} from the list.", color=discord.Color.green()))
-    await audit(ctx.guild, f"Member {member} ({member.id}) removed from gay list by {ctx.author}")
-
-# =========================
-# CHECKGAY COMMAND
-# =========================
-
-@bot.command(name="checkgay")
-@commands.guild_only()
-async def checkgay(ctx, member: discord.Member = None):
-    """Checks a member's percentage (0% for the bot owner)."""
-    target = member or ctx.author
-    
-    # Check if the target is the bot owner
-    if OWNER_ID and target.id == OWNER_ID:
-        percentage = 0
-        extra_text = " (ren has aura)"
-    else:
-        percentage = random.randint(0, 100)
-        extra_text = ""
-
-    embed = discord.Embed(
-        title="🏳️‍🌈 Gay Rate Calculator",
-        description=f"**{target.display_name}** is **{percentage}%** gay!{extra_text}",
-        color=discord.Color.magenta(),
-        timestamp=discord.utils.utcnow()
-    )
-    embed.set_thumbnail(url=target.display_avatar.url)
-    embed.set_footer(text=f"Requested by {ctx.author.display_name}")
-    
-    await ctx.reply(embed=embed, mention_author=False)
-
-# =========================
-# PRANK NUKE COMMAND
-# =========================
-
-@bot.command(name="nuke")
-@commands.guild_only()
-async def prank_nuke(ctx):
-    """Sends a fake server nuke warning followed by a separate prank message."""
-    
-    # 1. Fake Initial Warning (Red Embed)
-    fake_embed = discord.Embed(
-        title="⚠️ SERVER NUKE INITIATED ⚠️",
-        description=(
-            "**WARNING:** A full server purge sequence has been triggered by "
-            f"{ctx.author.mention}.\n\n"
-            "```diff\n"
-            "- Deleting all channels...\n"
-            "- Purging member roles...\n"
-            "- Wiping server configuration...\n"
-            "```\n"
-            "**Status:** `[████████████████----] 30%`\n"
-            "*Executing final payload in 10 seconds...*"
-        ),
-        color=discord.Color.red(),
-        timestamp=discord.utils.utcnow()
-    )
-    apply_embed_theme(ctx.guild.id, fake_embed)
-    
-    # Send the scary message first
-    await ctx.send(embed=fake_embed)
-    
-    # Wait 3 seconds for dramatic effect
-    await asyncio.sleep(10)
-    
-    # 2. The Reveal (Green Embed sent as a NEW message)
-    prank_embed = discord.Embed(
-        title="🎉 GOTCHA! JUST A PRANK! 🎉",
-        description=(
-            f"Relax everyone! {ctx.author.mention} tried to nuke the server, "
-            "but **Supreme Bot** protected everything! 🛡️\n\n"
-            "✨ No channels, roles, or members were harmed."
-        ),
-        color=discord.Color.green(),
-        timestamp=discord.utils.utcnow()
-    )
-    apply_embed_theme(ctx.guild.id, prank_embed)
-    
-    # Send the prank reveal as its own separate message
-    await ctx.send(embed=prank_embed)
-
-# =========================
-# EVENTS & STARTUP
-# =========================
 
 @bot.event
 async def on_message(message):
-    if message.author.bot:
-        return
-
+    if message.author.bot: return
     ctx = await bot.get_context(message)
-    guild = message.guild
-    if guild is not None:
-        ai_channel_id = config.get("ai_channels", {}).get(str(guild.id))
-        is_blacklisted = str(message.author.id) in {str(uid) for uid in config.get("blacklists", {}).get(str(guild.id), [])}
-        is_disabled = config.get("disabled_guilds", {}).get(str(guild.id), False)
-        if (ai_channel_id and message.channel.id == int(ai_channel_id)
-                and not ctx.valid and not is_blacklisted and not is_disabled
-                and message.content.strip()):
-            key = (guild.id, message.author.id)
-            now = time.monotonic()
-            wait = 5 - (now - AI_LAST_REQUEST.get(key, 0))
-            if wait > 0:
-                await message.reply(f"Give me {wait:.1f} seconds before your next AI message.", mention_author=False)
-            else:
-                AI_LAST_REQUEST[key] = now
-                async with message.channel.typing():
-                    try:
-                        answer = await call_ai(guild.id, message.author.id, message.content[:2000])
-                    except (aiohttp.ClientError, asyncio.TimeoutError):
-                        logging.exception("AI channel request failed")
-                        answer = "I couldn't reach the AI service. Try again in a moment."
-                    except RuntimeError as exc:
-                        answer = str(exc)
-                chunks = [answer[start:start + 1900] for start in range(0, len(answer), 1900)] or ["I couldn't create a reply."]
-                await message.reply(chunks[0], mention_author=False, allowed_mentions=discord.AllowedMentions.none())
-                for chunk in chunks[1:]:
-                    await message.channel.send(chunk, allowed_mentions=discord.AllowedMentions.none())
-
-    # Overriding on_message disables automatic command handling unless this is called.
     await bot.process_commands(message)
 
 
@@ -2975,33 +990,9 @@ async def on_ready():
         try:
             await bot.tree.sync()
             bot._slash_commands_synced = True
-            logging.info("Synced Supreme Bot slash commands")
-        except discord.HTTPException:
-            logging.exception("Could not sync slash commands; check that the app has the applications.commands scope")
-    activity_settings = config.get("activity", {})
-    if activity_settings.get("type") in ACTIVITY_TYPES and activity_settings.get("text"):
-        await apply_bot_activity(activity_settings["type"], activity_settings["text"])
+        except Exception:
+            pass
     logging.info("Supreme logged in as %s", bot.user)
-
-
-@bot.event
-async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
-        return
-    if isinstance(error, EconomySpamTriggered):
-        return
-    if isinstance(error, MemberBlacklisted):
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You are blacklisted from using Supreme Bot commands in this server.", color=discord.Color.red()))
-    if isinstance(error, GuildCommandsDisabled):
-        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Bot commands are disabled in this server.", color=discord.Color.orange()))
-    if isinstance(error, EconomyChannelOnly):
-        return await ctx.reply(embed=economy_embed(f"Economy commands are only available in <#{ECONOMY_CHANNEL_ID}>."))
-    if isinstance(error, commands.CheckFailure):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
-        return
-    
-    logging.exception("Command error:", exc_info=error)
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Error: `{str(error)}`", color=discord.Color.red()))
 
 
 async def main():
@@ -3012,20 +1003,6 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

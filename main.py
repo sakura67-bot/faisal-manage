@@ -1,3 +1,4 @@
+import io
 import os
 import re
 import json
@@ -10,6 +11,7 @@ import time
 import urllib.parse
 import aiohttp
 import discord
+from typing import Literal
 from discord.ext import commands
 from aiohttp import web
 
@@ -53,13 +55,13 @@ bot = commands.Bot(
 
 DASHBOARD_HTML = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Egg Manager Dashboard</title>
-<style>:root{color-scheme:dark;--bg:#08160b;--card:#112a17;--line:#295332;--accent:#8bffb4;--accent2:#65e2a4;--text:#f5fff8;--muted:#aaceb2;--shadow:0 24px 70px #0008}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(ellipse at 10% -10%,#358b5488,transparent 35%),radial-gradient(ellipse at 100% 20%,#14774670,transparent 30%),var(--bg);font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--text);min-height:100vh}body:before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.16;background-image:radial-gradient(#bdffd3 .6px,transparent .6px);background-size:24px 24px;mask-image:linear-gradient(to bottom,#000,transparent 80%)}.wrap{position:relative;max-width:1120px;margin:0 auto;padding:32px 22px 60px}.bar{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 18px;background:#0e2513b8;border:1px solid #9cffbd27;border-radius:18px;backdrop-filter:blur(16px);box-shadow:0 12px 36px #0003}.tag{color:#c6ffda;font-weight:800;letter-spacing:.14em;text-transform:uppercase;font-size:11px}.bar .small{margin-top:3px}.hero{position:relative;overflow:hidden;margin:24px 0 20px;padding:36px 34px;border:1px solid #aaffc733;border-radius:26px;background:linear-gradient(120deg,#1d4d2edd,#112b17dd 65%,#123d28dd);box-shadow:var(--shadow)}.hero:after{content:'✦';position:absolute;right:7%;top:-65px;font-size:230px;line-height:1;color:#d0ffe00b;transform:rotate(12deg);pointer-events:none}.hero h1{max-width:720px;font-size:clamp(34px,6vw,58px);line-height:1.05;letter-spacing:-.045em;margin:11px 0 14px}.hero p{max-width:700px;margin:0;color:#c3dfca;font-size:16px}.hero:before{content:'CONTROL CENTER  /  YOUR SERVER';display:inline-flex;color:#aaf7d0;font-size:10px;font-weight:800;letter-spacing:.16em}.card{position:relative;background:linear-gradient(145deg,#15321bf2,#102615f5);border:1px solid #c5ffd51c;border-radius:20px;padding:24px;margin:18px 0;box-shadow:0 18px 50px #020b0475;transition:transform .22s,border-color .22s,box-shadow .22s}.card:hover{border-color:#8bffb450;box-shadow:0 22px 60px #020b0499,0 0 28px #70ffa20d}.card h2{display:flex;align-items:center;gap:10px;margin:0 0 4px;font-size:21px;letter-spacing:-.02em}.card h2:before{content:'';width:4px;height:22px;border-radius:5px;background:linear-gradient(var(--accent),var(--accent2));box-shadow:0 0 14px #8bffb488}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;margin-top:16px}.field{display:flex;flex-direction:column;gap:8px;margin:9px 0}label{font-size:13px;font-weight:700;color:#e3f5e8}input,select,textarea{background:#0b2010;color:var(--text);border:1px solid #355e3e;border-radius:12px;padding:12px 14px;font:inherit;width:100%;outline:0;transition:border-color .18s,box-shadow .18s,background .18s}input:focus,select:focus,textarea:focus{border-color:#8bffb4;box-shadow:0 0 0 3px #8bffb424;background:#102a16}input[type=color]{height:47px;padding:5px;cursor:pointer}textarea{min-height:115px;resize:vertical}button,.button{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(120deg,#9affbe,#72ef9e);color:#102618;border:1px solid #cdffdf55;border-radius:12px;padding:12px 18px;font:inherit;font-weight:800;text-decoration:none;cursor:pointer;margin:7px 8px 0 0;box-shadow:0 8px 24px #70e99c33;transition:transform .18s,filter .18s,box-shadow .18s}button:hover,.button:hover{transform:translateY(-2px);filter:brightness(1.08);box-shadow:0 12px 30px #70e99c55}button:active,.button:active{transform:translateY(0)}button.secondary{background:#204328;color:#e7ffed;border-color:#6a957355;box-shadow:none}.small{font-size:12px;color:var(--muted)}.hidden{display:none}.row{display:flex;gap:10px;align-items:center}.status{min-height:26px;color:#a7f4d5;margin-top:12px}.preview{white-space:pre-wrap;background:linear-gradient(110deg,#0b2010,#112a17);border:1px solid #295332;border-left:4px solid var(--accent);padding:16px;border-radius:12px;min-height:76px;color:#e2f5e7;margin-top:12px}.card>p{color:var(--muted);line-height:1.65;margin:4px 0 10px}.card .field .small{line-height:1.5}@media(max-width:700px){.grid{grid-template-columns:1fr}.wrap{padding:16px 12px 38px}.card{padding:18px;border-radius:16px}.hero{padding:28px 22px;border-radius:20px}.hero:after{right:-8%;top:-25px;font-size:150px}.bar{padding:12px 14px}}.shop-items{display:grid;gap:10px;margin-top:20px}.shop-item{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:14px 16px;background:#0b2010;border:1px solid #295332;border-radius:13px}.shop-item strong{color:#fff}.shop-item .small{margin-top:3px}.shop-item button{padding:8px 12px}.shop-price{color:#aaf7d0;font-weight:800;white-space:nowrap}@media(max-width:700px){.shop-item{align-items:flex-start;flex-direction:column}}.dash-nav{position:sticky;top:10px;z-index:5;display:flex;gap:8px;flex-wrap:wrap;padding:10px;margin:14px 0 20px;background:#0c2011dd;border:1px solid #adffc824;border-radius:16px;backdrop-filter:blur(16px)}.dash-nav a{color:#d9eedf;text-decoration:none;font-size:13px;font-weight:750;padding:9px 13px;border-radius:10px;transition:.18s}.dash-nav a:hover{color:#fff;background:#8bffb429}.card[id]{scroll-margin-top:90px}</style></head><body><main class="wrap"><div class="bar"><div><div class="tag">Egg Manager • Bot-Hosting.net</div><div class="small">Server dashboard</div></div><button class="secondary" onclick="logout()">Log out</button></div>
+<style>:root{color-scheme:dark;--bg:#08160b;--card:#112a17;--line:#295332;--accent:#8bffb4;--accent2:#65e2a4;--text:#f5fff8;--muted:#aaceb2;--shadow:0 24px 70px #0008}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:radial-gradient(ellipse at 10% -10%,#358b5488,transparent 35%),radial-gradient(ellipse at 100% 20%,#14774670,transparent 30%),var(--bg);font:15px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--text);min-height:100vh}body:before{content:'';position:fixed;inset:0;pointer-events:none;opacity:.16;background-image:radial-gradient(#bdffd3 .6px,transparent .6px);background-size:24px 24px;mask-image:linear-gradient(to bottom,#000,transparent 80%)}.wrap{position:relative;max-width:1120px;margin:0 auto;padding:32px 22px 60px}.bar{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 18px;background:#0e2513b8;border:1px solid #9cffbd27;border-radius:18px;backdrop-filter:blur(16px);box-shadow:0 12px 36px #0003}.tag{color:#c6ffda;font-weight:800;letter-spacing:.14em;text-transform:uppercase;font-size:11px}.bar .small{margin-top:3px}.hero{position:relative;overflow:hidden;margin:24px 0 20px;padding:36px 34px;border:1px solid #aaffc733;border-radius:26px;background:linear-gradient(120deg,#1d4d2edd,#112b17dd 65%,#123d28dd);box-shadow:var(--shadow)}.hero:after{content:'✦';position:absolute;right:7%;top:-65px;font-size:230px;line-height:1;color:#d0ffe00b;transform:rotate(12deg);pointer-events:none}.hero h1{max-width:720px;font-size:clamp(34px,6vw,58px);line-height:1.05;letter-spacing:-.045em;margin:11px 0 14px}.hero p{max-width:700px;margin:0;color:#c3dfca;font-size:16px}.hero:before{content:'CONTROL CENTER  /  YOUR SERVER';display:inline-flex;color:#aaf7d0;font-size:10px;font-weight:800;letter-spacing:.16em}.card{position:relative;background:linear-gradient(145deg,#15321bf2,#102615f5);border:1px solid #c5ffd51c;border-radius:20px;padding:24px;margin:18px 0;box-shadow:0 18px 50px #020b0475;transition:transform .22s,border-color .22s,box-shadow .22s}.card:hover{border-color:#8bffb450;box-shadow:0 22px 60px #020b0499,0 0 28px #70ffa20d}.card h2{display:flex;align-items:center;gap:10px;margin:0 0 4px;font-size:21px;letter-spacing:-.02em}.card h2:before{content:'';width:4px;height:22px;border-radius:5px;background:linear-gradient(var(--accent),var(--accent2));box-shadow:0 0 14px #8bffb488}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;margin-top:16px}.field{display:flex;flex-direction:column;gap:8px;margin:9px 0}label{font-size:13px;font-weight:700;color:#e3f5e8}input,select,textarea{background:#0b2010;color:var(--text);border:1px solid #355e3e;border-radius:12px;padding:12px 14px;font:inherit;width:100%;outline:0;transition:border-color .18s,box-shadow .18s,background .18s}input:focus,select:focus,textarea:focus{border-color:#8bffb4;box-shadow:0 0 0 3px #8bffb424;background:#102a16}input[type=color]{height:47px;padding:5px;cursor:pointer}textarea{min-height:115px;resize:vertical}button,.button{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(120deg,#9affbe,#72ef9e);color:#102618;border:1px solid #cdffdf55;border-radius:12px;padding:12px 18px;font:inherit;font-weight:800;text-decoration:none;cursor:pointer;margin:7px 8px 0 0;box-shadow:0 8px 24px #70e99c33;transition:transform .18s,filter .18s,box-shadow .18s}button:hover,.button:hover{transform:translateY(-2px);filter:brightness(1.08);box-shadow:0 12px 30px #70e99c55}button:active,.button:active{transform:translateY(0)}button.secondary{background:#204328;color:#e7ffed;border-color:#6a957355;box-shadow:none}.small{font-size:12px;color:var(--muted)}.hidden{display:none}.row{display:flex;gap:10px;align-items:center}.status{min-height:26px;color:#a7f4d5;margin-top:12px}.preview{white-space:pre-wrap;background:linear-gradient(110deg,#0b2010,#112a17);border:1px solid #295332;border-left:4px solid var(--accent);padding:16px;border-radius:12px;min-height:76px;color:#e2f5e7;margin-top:12px}.card>p{color:var(--muted);line-height:1.65;margin:4px 0 10px}.card .field .small{line-height:1.5}@media(max-width:700px){.grid{grid-template-columns:1fr}.wrap{padding:16px 12px 38px}.card{padding:18px;border-radius:16px}.hero{padding:28px 22px;border-radius:20px}.hero:after{right:-8%;top:-25px;font-size:150px}.bar{padding:12px 14px}}.dash-nav{position:sticky;top:10px;z-index:5;display:flex;gap:8px;flex-wrap:wrap;padding:10px;margin:14px 0 20px;background:#0c2011dd;border:1px solid #adffc824;border-radius:16px;backdrop-filter:blur(16px)}.dash-nav a{color:#d9eedf;text-decoration:none;font-size:13px;font-weight:750;padding:9px 13px;border-radius:10px;transition:.18s}.dash-nav a:hover{color:#fff;background:#8bffb429}.card[id]{scroll-margin-top:90px}</style></head><body><main class="wrap"><div class="bar"><div><div class="tag">Egg Manager • Bot-Hosting.net</div><div class="small">Server dashboard</div></div><button class="secondary" onclick="logout()">Log out</button></div>
 <section class="hero"><h1>Bot control panel</h1><p>One beautiful control center for your server setup, embeds, tickets, and staff tools. Dashboard access is limited to the bot owner and trusted extra owners.</p></section>
 <nav class="dash-nav" aria-label="Dashboard sections"><a href="#settings">⚙️ Server</a><a href="#embedCard">✦ Embeds</a></nav>
 <section class="card"><div class="field"><label for="guild">Discord server</label><select id="guild"></select></div><div id="settings" class="hidden"><h2>Server settings</h2><p class="small">Prefix, staff destinations, embed appearance, and ticket panel content are saved per server.</p><div class="grid">
 <div class="field"><label for="prefix">Command prefix</label><input id="prefix" maxlength="5" value=">"><span class="small">Example: `>` or `!`</span></div>
 <div class="field"><label for="supervisor">Supervisor role</label><select id="supervisor"></select></div>
-<div class="field"><label for="promodemo">Promotion / demotion channel</label><select id="promodemo"></select></div><div class="field"><label for="audit">Audit log channel</label><select id="audit"></select></div>
+<div class="field"><label for="promodemo">Promotion / demotion channel</label><select id="promodemo"></select></div><div class="field"><label for="audit">Logs channel</label><select id="audit"></select></div>
 <div class="field"><label for="embedColor">Default embed color</label><input id="embedColor" type="color" value="#2ecc71"></div><div class="field"><label for="footer">Default embed footer</label><input id="footer" maxlength="200" placeholder="Egg Manager"></div>
 <div class="field"><label for="ticketTitle">Ticket panel title</label><input id="ticketTitle" maxlength="100"></div><div class="field"><label for="ticketChannel">Ticket panel channel</label><select id="ticketChannel"></select></div>
 <div class="field"><label for="ticketDescription">Ticket panel description</label><textarea id="ticketDescription" maxlength="2000"></textarea></div>
@@ -509,7 +511,11 @@ config = {
     "blacklists": {},
     "disabled_guilds": {},
     "ai_tasks": {},
-    "ai_channels": {}
+    "ai_channels": {},
+    "levels": {},
+    "level_settings": {},
+    "level_roles": {},
+    "log_settings": {}
 }
 
 
@@ -539,6 +545,24 @@ def save_config():
         return False
 
 
+CONFIG_DIRTY = False
+
+
+def mark_config_dirty():
+    global CONFIG_DIRTY
+    CONFIG_DIRTY = True
+
+
+async def config_autosave_loop():
+    """Flush frequently-changing data (XP) to disk every 30 seconds instead of on every message."""
+    global CONFIG_DIRTY
+    while True:
+        await asyncio.sleep(30)
+        if CONFIG_DIRTY:
+            CONFIG_DIRTY = False
+            save_config()
+
+
 def get_server_prefix(guild_id):
     return config.get("prefixes", {}).get(str(guild_id), ">") if guild_id else ">"
 
@@ -549,7 +573,7 @@ def get_embed_settings(guild_id):
 
 
 def get_ticket_settings(guild_id):
-    defaults = {"title": f"{EMOJIS['ticket']} Support Ticket Center", "description": "Choose a ticket type from the dropdown below to open a private channel with our staff team."}
+    defaults = {"title": f"{EMOJIS['announcement']} Support Ticket Center", "description": "Choose a ticket type from the dropdown below to open a private channel with our staff team."}
     return {**defaults, **config.get("ticket_settings", {}).get(str(guild_id), {})}
 
 
@@ -648,107 +672,348 @@ def check_and_increment_action_limit(ctx, action_type, limit=3):
 
 
 # =========================
-# AUDIT LOGGING
+# LOGGING SYSTEM
 # =========================
 
-async def audit(guild, message):
+LOG_CATEGORIES = {
+    "messages": "Message edits & deletes",
+    "members": "Joins, leaves & member updates",
+    "voice": "Voice activity",
+    "server": "Channel & role changes",
+    "moderation": "Moderation & audit actions",
+    "tickets": "Ticket activity",
+}
+LOG_SUPPRESS = {}
+
+
+def suppress_log(guild_id, user_id, action):
+    """Mark an action as already logged by a command so the event listener doesn't log it twice."""
+    LOG_SUPPRESS[(guild_id, user_id, action)] = time.monotonic()
+
+
+def log_suppressed(guild_id, user_id, *actions):
+    now = time.monotonic()
+    return any(now - LOG_SUPPRESS.get((guild_id, user_id, action), -999) < 15 for action in actions)
+
+
+def log_category_enabled(guild_id, category):
+    return bool(config.get("log_settings", {}).get(str(guild_id), {}).get(category, True))
+
+
+def get_log_channel(guild):
     channel_id = guild_setting("audit_channels", guild.id)
     if not channel_id:
-        return
-    channel = guild.get_channel(int(channel_id))
+        return None
+    return guild.get_channel(int(channel_id))
+
+
+async def send_log(guild, category, title, description=None, *, fields=None, color=None, user=None, file=None):
+    """Send a green log embed to the server's log channel (if one is set and the category is on)."""
+    if guild is None or not log_category_enabled(guild.id, category):
+        return None
+    channel = get_log_channel(guild)
     if channel is None:
-        return
+        return None
+    embed = discord.Embed(title=title, description=(description or None), color=color or discord.Color(0x2ECC71), timestamp=discord.utils.utcnow())
+    for name, value, inline in fields or []:
+        embed.add_field(name=name, value=(str(value)[:1024] or "\u200b"), inline=inline)
+    if user is not None:
+        embed.set_author(name=f"{user} ({user.id})", icon_url=user.display_avatar.url)
+    embed.set_footer(text="Egg Manager \u2022 Logs")
+    kwargs = {"embed": embed, "allowed_mentions": discord.AllowedMentions.none()}
+    if file is not None:
+        kwargs["file"] = file
     try:
-        await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
+        return await channel.send(**kwargs)
     except discord.HTTPException:
-        logging.exception("Failed to send audit log")
+        logging.exception("Failed to send log")
+        return None
+
+
+async def audit(guild, message):
+    await send_log(guild, "moderation", f"{EMOJIS['audit']} Audit Log", str(message)[:4000])
 
 
 # =========================
-# TICKET SYSTEM VIEWS
+# TICKET SYSTEM
 # =========================
 
-class TicketCloseView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+TICKET_TYPES = {
+    "support": {"label": "General Support", "description": "Ask the team for help", "emoji": "welcome"},
+    "report": {"label": "Report Staff", "description": "Privately report a staff member", "emoji": "warning"},
+    "creator": {"label": "Content Creator", "description": "Content creator requests and applications", "emoji": "promo"},
+}
 
-    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, emoji="🔒", custom_id="close_ticket_btn")
-    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_message(f"{EMOJIS['warning']} Closing ticket in 5 seconds...", ephemeral=False)
-        await audit(interaction.guild, f"Ticket closed by {interaction.user} | Channel: {interaction.channel.name}")
-        await asyncio.sleep(5)
+
+def ticket_emoji(name):
+    """Animated custom application emoji for ticket UI."""
+    return discord.PartialEmoji.from_str(EMOJIS[name])
+
+
+def ticket_owner_id(channel):
+    match = re.search(r"owner:(\d+)", getattr(channel, "topic", None) or "")
+    return int(match.group(1)) if match else None
+
+
+def ticket_type_of(channel):
+    match = re.search(r"type:(\w+)", getattr(channel, "topic", None) or "")
+    return match.group(1) if match else "support"
+
+
+def interaction_is_staff(interaction):
+    member = interaction.user
+    guild = interaction.guild
+    if guild is None or not isinstance(member, discord.Member):
+        return False
+    extra_ids = {str(uid) for uid in config.get("extra_owners", {}).get(str(guild.id), [])}
+    if member.id == OWNER_ID or member.id == guild.owner_id or str(member.id) in extra_ids:
+        return True
+    role_id = guild_setting("supervisor_roles", guild.id)
+    if role_id and any(role.id == int(role_id) for role in member.roles):
+        return True
+    if member.guild_permissions.kick_members:
+        return True
+    return any("staff" in r.name.lower() or "trial" in r.name.lower() or "mod" in r.name.lower() for r in member.roles)
+
+
+async def build_ticket_transcript(channel, closed_by):
+    lines = [
+        f"Transcript of #{channel.name} ({channel.id})",
+        f"Closed by {closed_by} ({closed_by.id}) at {discord.utils.utcnow():%Y-%m-%d %H:%M UTC}",
+        "-" * 60,
+    ]
+    count = 0
+    async for message in channel.history(limit=2000, oldest_first=True):
+        stamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S")
+        text = message.clean_content or ""
+        for embed in message.embeds:
+            text += f" [embed: {embed.title or ''} {embed.description or ''}]"
+        attachments = " ".join(a.url for a in message.attachments)
+        lines.append(f"[{stamp}] {message.author} ({message.author.id}): {text} {attachments}".rstrip())
+        count += 1
+    return "\n".join(lines).encode("utf-8"), count
+
+
+async def close_ticket_channel(channel, closer, reason):
+    guild = channel.guild
+    owner_id = ticket_owner_id(channel)
+    ticket_type = TICKET_TYPES.get(ticket_type_of(channel), TICKET_TYPES["support"])["label"]
+    try:
+        data, count = await build_ticket_transcript(channel, closer)
+    except discord.HTTPException:
+        data, count = b"Transcript unavailable.", 0
+    file_name = f"{channel.name}.txt"
+    await send_log(
+        guild, "tickets", f"{EMOJIS['error']} Ticket Closed",
+        fields=[
+            ("Ticket", f"#{channel.name}", True),
+            ("Category", ticket_type, True),
+            ("Opened by", f"<@{owner_id}>" if owner_id else "Unknown", True),
+            ("Closed by", closer.mention, True),
+            ("Messages", count, True),
+            ("Reason", reason or "No reason provided", False),
+        ],
+        user=closer,
+        file=discord.File(io.BytesIO(data), filename=file_name),
+    )
+    owner = guild.get_member(owner_id) if owner_id else None
+    if owner is not None:
+        dm_embed = discord.Embed(
+            title=f"{EMOJIS['ticket']} Your ticket was closed",
+            description=f"Your **{ticket_type}** ticket in **{guild.name}** was closed.\n**Reason:** {reason or 'No reason provided'}",
+            color=discord.Color(0x2ECC71),
+            timestamp=discord.utils.utcnow(),
+        )
         try:
-            await interaction.channel.delete(reason=f"Closed by {interaction.user}")
+            await owner.send(embed=dm_embed, file=discord.File(io.BytesIO(data), filename=file_name))
         except discord.HTTPException:
             pass
+    await asyncio.sleep(5)
+    try:
+        await channel.delete(reason=f"Ticket closed by {closer}: {reason}"[:480])
+    except discord.HTTPException:
+        pass
+
+
+class TicketCloseModal(discord.ui.Modal, title="Close Ticket"):
+    reason = discord.ui.TextInput(label="Reason (optional)", style=discord.TextStyle.paragraph, required=False, max_length=300, placeholder="Why is this ticket being closed?")
+
+    async def on_submit(self, interaction: discord.Interaction):
+        reason = str(self.reason.value or "").strip() or "No reason provided"
+        await interaction.response.send_message(embed=discord.Embed(
+            description=f"{EMOJIS['warning']} Closing this ticket in 5 seconds...\n**Reason:** {reason}",
+            color=discord.Color(0x2ECC71),
+        ))
+        await close_ticket_channel(interaction.channel, interaction.user, reason)
+
+
+class TicketControlView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.claim_ticket.emoji = ticket_emoji("success")
+        self.close_ticket.emoji = ticket_emoji("error")
+
+    @discord.ui.button(label="Claim", style=discord.ButtonStyle.green, custom_id="ticket_claim_btn")
+    async def claim_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction_is_staff(interaction):
+            await interaction.response.send_message(f"{EMOJIS['error']} Only staff can claim tickets.", ephemeral=True)
+            return
+        channel = interaction.channel
+        topic = channel.topic or ""
+        claimed = re.search(r"claimed:(\d+)", topic)
+        if claimed:
+            await interaction.response.send_message(f"{EMOJIS['warning']} Already claimed by <@{claimed.group(1)}>.", ephemeral=True)
+            return
+        await interaction.response.send_message(embed=discord.Embed(
+            description=f"{EMOJIS['success']} {interaction.user.mention} has claimed this ticket.",
+            color=discord.Color(0x2ECC71),
+        ))
+        try:
+            await channel.edit(topic=f"{topic} | claimed:{interaction.user.id}"[:1000])
+        except discord.HTTPException:
+            pass
+        await send_log(interaction.guild, "tickets", f"{EMOJIS['success']} Ticket Claimed", fields=[("Ticket", channel.mention, True), ("Claimed by", interaction.user.mention, True)], user=interaction.user)
+
+    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket_btn")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        owner_id = ticket_owner_id(interaction.channel)
+        if not (interaction_is_staff(interaction) or interaction.user.id == owner_id):
+            await interaction.response.send_message(f"{EMOJIS['error']} Only staff or the ticket owner can close this ticket.", ephemeral=True)
+            return
+        await interaction.response.send_modal(TicketCloseModal())
 
 
 class TicketSetupView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
+        self.create_ticket.options = [
+            discord.SelectOption(label=info["label"], value=key, description=info["description"], emoji=ticket_emoji(info["emoji"]))
+            for key, info in TICKET_TYPES.items()
+        ]
 
-    @discord.ui.select(
-        placeholder="Choose a ticket type...",
-        min_values=1,
-        max_values=1,
-        custom_id="ticket_type_select",
-        options=[
-            discord.SelectOption(label="General Support", value="support", description="Ask the team for help", emoji="🎟️"),
-            discord.SelectOption(label="Report a Member", value="report", description="Privately report a server issue", emoji="🚩"),
-            discord.SelectOption(label="Other Question", value="other", description="Contact the staff team", emoji="💬"),
-        ],
-    )
+    @discord.ui.select(placeholder="Choose a ticket type...", min_values=1, max_values=1, custom_id="ticket_type_select", options=[discord.SelectOption(label="General Support", value="support")])
     async def create_ticket(self, interaction: discord.Interaction, select: discord.ui.Select):
         guild = interaction.guild
         member = interaction.user
-        ticket_type = select.values[0]
-        channel_name = f"ticket-{ticket_type}-{member.id}"
+        ticket_type = select.values[0] if select.values[0] in TICKET_TYPES else "support"
+        info = TICKET_TYPES[ticket_type]
 
-        existing_channel = discord.utils.get(guild.text_channels, name=channel_name)
-        if existing_channel:
-            await interaction.response.send_message(f"{EMOJIS['error']} You already have this ticket open: {existing_channel.mention}", ephemeral=True)
-            return
+        for existing in guild.text_channels:
+            if ticket_owner_id(existing) == member.id and ticket_type_of(existing) == ticket_type:
+                await interaction.response.send_message(f"{EMOJIS['error']} You already have this ticket open: {existing.mention}", ephemeral=True)
+                return
 
         await interaction.response.defer(ephemeral=True)
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            member: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True)
+            member: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, attach_files=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, read_message_history=True),
         }
-
+        staff_roles = []
         supervisor_role_id = guild_setting("supervisor_roles", guild.id)
         if supervisor_role_id:
             sup_role = guild.get_role(int(supervisor_role_id))
             if sup_role:
-                overwrites[sup_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-
+                staff_roles.append(sup_role)
         staff_team_role = discord.utils.find(lambda r: "staff team" in r.name.lower(), guild.roles)
-        if staff_team_role:
-            overwrites[staff_team_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+        if staff_team_role and staff_team_role not in staff_roles:
+            staff_roles.append(staff_team_role)
+        for role in staff_roles:
+            overwrites[role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True, attach_files=True)
 
         category = discord.utils.get(guild.categories, name="Support Tickets")
-        if not category:
-            category = await guild.create_category("Support Tickets")
-
-        channel = await guild.create_text_channel(
-            name=channel_name,
-            category=category,
-            overwrites=overwrites,
-            topic=f"{ticket_type.title()} ticket for {member} ({member.id})"
-        )
+        try:
+            if not category:
+                category = await guild.create_category("Support Tickets")
+            slug = re.sub(r"[^a-z0-9]", "", member.name.lower())[:20] or str(member.id)
+            channel = await guild.create_text_channel(
+                name=f"ticket-{ticket_type}-{slug}",
+                category=category,
+                overwrites=overwrites,
+                topic=f"{info['label']} ticket for {member} | owner:{member.id} | type:{ticket_type}",
+            )
+        except discord.HTTPException:
+            await interaction.followup.send(f"{EMOJIS['error']} I couldn't create your ticket. I need the Manage Channels permission.", ephemeral=True)
+            return
 
         embed = discord.Embed(
-            title=f"{EMOJIS['ticket']} {ticket_type.title()} Ticket",
-            description=f"Hello {member.mention}! Support staff will be with you shortly.\nUse the button below when you are ready to close this ticket.",
+            title=f"{EMOJIS['announcement']} {info['label']} Ticket",
+            description=f"Hello {member.mention}! A staff member will be with you shortly.\nDescribe your issue below. Use the buttons when you are done.",
             color=discord.Color(0x2ECC71),
-            timestamp=discord.utils.utcnow()
+            timestamp=discord.utils.utcnow(),
         )
-        embed.set_footer(text="Egg Manager • Ticket System")
+        embed.add_field(name="Opened by", value=member.mention, inline=True)
+        embed.add_field(name="Category", value=info["label"], inline=True)
+        embed.set_footer(text="Egg Manager \u2022 Ticket System")
         apply_embed_theme(guild.id, embed)
 
-        await channel.send(embed=embed, view=TicketCloseView())
-        await interaction.followup.send(f"{EMOJIS['success']} Your {ticket_type} ticket is ready: {channel.mention}", ephemeral=True)
-        await audit(guild, f"{ticket_type.title()} ticket created by {member} ({member.id}) | Channel: {channel.name}")
+        ping = " ".join([member.mention] + [role.mention for role in staff_roles])
+        await channel.send(
+            content=ping,
+            embed=embed,
+            view=TicketControlView(),
+            allowed_mentions=discord.AllowedMentions(users=[member], roles=staff_roles),
+        )
+        await interaction.followup.send(f"{EMOJIS['success']} Your {info['label']} ticket is ready: {channel.mention}", ephemeral=True)
+        await send_log(
+            guild, "tickets", f"{EMOJIS['announcement']} Ticket Opened",
+            fields=[("Ticket", channel.mention, True), ("Category", info["label"], True), ("Opened by", member.mention, True)],
+            user=member,
+        )
+
+
+async def ticket_command_guard(ctx, allow_owner=False):
+    owner_id = ticket_owner_id(ctx.channel)
+    if owner_id is None:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} This command only works inside a ticket channel.", color=discord.Color.red()), ephemeral=True)
+        return False
+    if user_is_staff(ctx) or (allow_owner and ctx.author.id == owner_id):
+        return True
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()), ephemeral=True)
+    return False
+
+
+@bot.hybrid_group(name="ticket", invoke_without_command=True)
+@commands.guild_only()
+async def ticket_group(ctx):
+    """Manage the ticket you are in."""
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['ticket']} Use `/ticket add`, `/ticket remove` or `/ticket close` inside a ticket channel.", color=discord.Color(0x2ECC71)))
+
+
+@ticket_group.command(name="add")
+@commands.guild_only()
+async def ticket_add(ctx, member: discord.Member):
+    """Add a member to this ticket."""
+    if not await ticket_command_guard(ctx):
+        return
+    await ctx.channel.set_permissions(member, view_channel=True, send_messages=True, read_message_history=True)
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Added {member.mention} to this ticket.", color=discord.Color(0x2ECC71)))
+    await send_log(ctx.guild, "tickets", f"{EMOJIS['success']} Ticket Member Added", fields=[("Ticket", ctx.channel.mention, True), ("Added", member.mention, True), ("By", ctx.author.mention, True)], user=ctx.author)
+
+
+@ticket_group.command(name="remove")
+@commands.guild_only()
+async def ticket_remove(ctx, member: discord.Member):
+    """Remove a member from this ticket."""
+    if not await ticket_command_guard(ctx):
+        return
+    if member.id == ticket_owner_id(ctx.channel):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} You can't remove the ticket owner. Close the ticket instead.", color=discord.Color.orange()))
+        return
+    await ctx.channel.set_permissions(member, overwrite=None)
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Removed {member.mention} from this ticket.", color=discord.Color(0x2ECC71)))
+    await send_log(ctx.guild, "tickets", f"{EMOJIS['warning']} Ticket Member Removed", fields=[("Ticket", ctx.channel.mention, True), ("Removed", member.mention, True), ("By", ctx.author.mention, True)], user=ctx.author)
+
+
+@ticket_group.command(name="close")
+@commands.guild_only()
+async def ticket_close(ctx, *, reason: str = "No reason provided"):
+    """Close this ticket and save a transcript."""
+    if not await ticket_command_guard(ctx, allow_owner=True):
+        return
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Closing this ticket in 5 seconds...\n**Reason:** {reason}", color=discord.Color(0x2ECC71)))
+    await close_ticket_channel(ctx.channel, ctx.author, reason)
+
 
 # =========================
 # EMBED HELPERS
@@ -811,7 +1076,7 @@ async def change_staff_role(ctx, member, target_role, action):
 # MANAGEMENT & STAFF COMMANDS
 # =========================
 
-@bot.command(name="promo")
+@bot.hybrid_command(name="promo")
 @commands.guild_only()
 async def promo(ctx, staff: discord.Member, target_role: discord.Role = None):
     """Promotes a staff member."""
@@ -822,7 +1087,7 @@ async def promo(ctx, staff: discord.Member, target_role: discord.Role = None):
     if target_role is None:
         ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id))
         if not ladder:
-            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} No rank ladder configured. Add roles using `{get_server_prefix(ctx.guild.id)}ranks add @role`", color=discord.Color.orange()))
+            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} No rank ladder configured. Add roles using `/ranks add @role`", color=discord.Color.orange()))
             return
 
         user_role_ids = [r.id for r in staff.roles]
@@ -842,7 +1107,7 @@ async def promo(ctx, staff: discord.Member, target_role: discord.Role = None):
     await change_staff_role(ctx, staff, target_role, "promote")
 
 
-@bot.command(name="demo")
+@bot.hybrid_command(name="demo")
 @commands.guild_only()
 async def demo(ctx, staff: discord.Member, target_role: discord.Role = None):
     """Demotes a staff member from their highest ladder rank."""
@@ -853,7 +1118,7 @@ async def demo(ctx, staff: discord.Member, target_role: discord.Role = None):
     if target_role is None:
         ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id))
         if not ladder:
-            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} No rank ladder configured. Add roles using `{get_server_prefix(ctx.guild.id)}ranks add @role`", color=discord.Color.orange()))
+            await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} No rank ladder configured. Add roles using `/ranks add @role`", color=discord.Color.orange()))
             return
 
         user_role_ids = [r.id for r in staff.roles]
@@ -872,7 +1137,7 @@ async def demo(ctx, staff: discord.Member, target_role: discord.Role = None):
     await change_staff_role(ctx, staff, target_role, "demote")
 
 
-@bot.command(name="super")
+@bot.hybrid_command(name="super")
 @commands.guild_only()
 async def super_cmd(ctx, member: discord.Member):
     """Assigns the supervisor role."""
@@ -892,18 +1157,22 @@ async def super_cmd(ctx, member: discord.Member):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Assigned supervisor role to {member.mention}.", color=discord.Color.green()))
 
 
-@bot.command(name="superintro")
+@bot.hybrid_command(name="superintro")
 @commands.guild_only()
 async def superintro(ctx):
-    """Deletes the trigger message and introduces supervisor commands."""
-    try:
-        await ctx.message.delete()
-    except discord.Forbidden:
-        pass
+    """Show the supervisor command guide."""
+    if ctx.interaction is None:
+        try:
+            await ctx.message.delete()
+        except (discord.Forbidden, discord.NotFound):
+            pass
 
     if not user_is_supervisor(ctx):
         err_msg = await ctx.send(embed=discord.Embed(description=f"{EMOJIS['error']} Only staff supervisors can use this command.", color=discord.Color.red()))
-        await err_msg.delete(delay=5)
+        try:
+            await err_msg.delete(delay=5)
+        except discord.HTTPException:
+            pass
         return
 
     embed = discord.Embed(
@@ -917,7 +1186,7 @@ async def superintro(ctx):
     )
 
     embed.add_field(
-        name=f"{EMOJIS['promo']} `{get_server_prefix(ctx.guild.id)}promo @member [@role]`",
+        name=f"{EMOJIS['promo']} `/promo @member [@role]`",
         value=(
             f"{EMOJIS['bullet']} Promotes a staff member.\n"
             f"{EMOJIS['bullet']} **Auto Ladder:** If no role is given, advances them to the next step up."
@@ -926,7 +1195,7 @@ async def superintro(ctx):
     )
 
     embed.add_field(
-        name=f"{EMOJIS['demo']} `{get_server_prefix(ctx.guild.id)}demo @member [@role]`",
+        name=f"{EMOJIS['demo']} `/demo @member [@role]`",
         value=(
             f"{EMOJIS['bullet']} Demotes a staff member.\n"
             f"{EMOJIS['bullet']} **Auto Ladder:** If no role is given, strips their highest rank to drop them down."
@@ -935,7 +1204,7 @@ async def superintro(ctx):
     )
 
     embed.add_field(
-        name=f"{EMOJIS['gear']} `{get_server_prefix(ctx.guild.id)}role @member @role`",
+        name=f"{EMOJIS['gear']} `/role @member @role`",
         value=f"{EMOJIS['bullet']} Quickly toggles an extra role on or off for a member.",
         inline=False
     )
@@ -944,18 +1213,22 @@ async def superintro(ctx):
     await ctx.send(embed=embed)
 
 
-@bot.command(name="staffintro")
+@bot.hybrid_command(name="staffintro")
 @commands.guild_only()
 async def staffintro(ctx):
-    """Deletes the trigger message and introduces staff moderation commands."""
-    try:
-        await ctx.message.delete()
-    except discord.Forbidden:
-        pass
+    """Show the staff moderation command guide."""
+    if ctx.interaction is None:
+        try:
+            await ctx.message.delete()
+        except (discord.Forbidden, discord.NotFound):
+            pass
 
     if not user_is_staff(ctx):
         err_msg = await ctx.send(embed=discord.Embed(description=f"{EMOJIS['error']} Only staff members can use this command.", color=discord.Color.red()))
-        await err_msg.delete(delay=5)
+        try:
+            await err_msg.delete(delay=5)
+        except discord.HTTPException:
+            pass
         return
 
     embed = discord.Embed(
@@ -971,10 +1244,10 @@ async def staffintro(ctx):
     embed.add_field(
         name=f"{EMOJIS['warning']} Moderation Commands (Max 3 Kicks/Bans Per 24 Hours)",
         value=(
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}kick @member [reason]` — Kicks a disruptive user from the server.\n"
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}ban @member [reason]` — Permanently bans a rule-breaker.\n"
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}mute @member [reason]` — Times out a user for 10 minutes.\n"
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}clear [amount]` — Purges recent chat messages cleanly."
+            f"{EMOJIS['bullet']} `/kick @member [reason]` — Kicks a disruptive user from the server.\n"
+            f"{EMOJIS['bullet']} `/ban @member [reason]` — Permanently bans a rule-breaker.\n"
+            f"{EMOJIS['bullet']} `/mute @member [reason]` — Times out a user for 10 minutes.\n"
+            f"{EMOJIS['bullet']} `/clear [amount]` — Purges recent chat messages cleanly."
         ),
         inline=False
     )
@@ -982,8 +1255,8 @@ async def staffintro(ctx):
     embed.add_field(
         name=f"{EMOJIS['user']} Utility & Information",
         value=(
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}userinfo [@member]` — Checks account creation, join dates, and roles.\n"
-            f"{EMOJIS['bullet']} `{get_server_prefix(ctx.guild.id)}avatar [@member]` — Views high-resolution profile pictures."
+            f"{EMOJIS['bullet']} `/userinfo [@member]` — Checks account creation, join dates, and roles.\n"
+            f"{EMOJIS['bullet']} `/avatar [@member]` — Views high-resolution profile pictures."
         ),
         inline=False
     )
@@ -992,7 +1265,7 @@ async def staffintro(ctx):
     await ctx.send(embed=embed)
 
 
-@bot.command(name="staff")
+@bot.hybrid_command(name="staff")
 @commands.guild_only()
 async def staff_cmd(ctx, member: discord.Member):
     """Assigns Staff Team and Trial Mod/Moderator roles automatically."""
@@ -1022,7 +1295,7 @@ async def staff_cmd(ctx, member: discord.Member):
     await audit(ctx.guild, f"Staff roles ({assigned_mentions}) given to {member} ({member.id}) by {ctx.author}")
 
 
-@bot.command(name="role")
+@bot.hybrid_command(name="role")
 @commands.guild_only()
 async def role_cmd(ctx, member: discord.Member, target_role: discord.Role):
     """Toggles a role on a member."""
@@ -1038,7 +1311,7 @@ async def role_cmd(ctx, member: discord.Member, target_role: discord.Role):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['promo']} Added {target_role.mention} to {member.mention}.", color=discord.Color.green()))
 
 
-@bot.command(name="steal")
+@bot.hybrid_command(name="steal")
 @commands.guild_only()
 async def steal(ctx, emoji: str, name: str = None):
     """Steals an emoji into the server."""
@@ -1064,7 +1337,7 @@ async def steal(ctx, emoji: str, name: str = None):
 # TICKET SETUP COMMAND
 # =========================
 
-@bot.command(name="ticketsetup")
+@bot.hybrid_command(name="ticketsetup")
 @commands.guild_only()
 async def ticketsetup(ctx):
     """Deploys the persistent ticket creation panel."""
@@ -1083,7 +1356,7 @@ async def ticketsetup(ctx):
 # MODERATION COMMANDS
 # =========================
 
-@bot.command(name="kick")
+@bot.hybrid_command(name="kick")
 @commands.guild_only()
 async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
     """Kicks a member (Staff capped at 3 per 24 hours)."""
@@ -1097,6 +1370,7 @@ async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
         return
 
     try:
+        suppress_log(ctx.guild.id, member.id, "kick")
         await member.kick(reason=f"{reason} (Kicked by {ctx.author})")
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Kicked {member.mention} | Reason: {reason}", color=discord.Color.orange()))
         await audit(ctx.guild, f"Member kicked: {member} ({member.id}) | Reason: {reason} | By: {ctx.author}")
@@ -1104,7 +1378,7 @@ async def kick(ctx, member: discord.Member, *, reason="No reason provided"):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} I lack permissions to kick that member.", color=discord.Color.red()))
 
 
-@bot.command(name="ban")
+@bot.hybrid_command(name="ban")
 @commands.guild_only()
 async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
     """Bans a member (Staff capped at 3 per 24 hours)."""
@@ -1118,6 +1392,7 @@ async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
         return
 
     try:
+        suppress_log(ctx.guild.id, member.id, "ban")
         await member.ban(reason=f"{reason} (Banned by {ctx.author})")
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Banned {member.mention} | Reason: {reason}", color=discord.Color.red()))
         await audit(ctx.guild, f"Member banned: {member} ({member.id}) | Reason: {reason} | By: {ctx.author}")
@@ -1125,20 +1400,26 @@ async def ban(ctx, member: discord.Member, *, reason="No reason provided"):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} I lack permissions to ban that member.", color=discord.Color.red()))
 
 
-@bot.command(name="clear")
+@bot.hybrid_command(name="clear")
 @commands.guild_only()
-async def clear(ctx, amount: int = 5):
-    """Purges messages."""
+async def clear(ctx, amount: commands.Range[int, 1, 100] = 5):
+    """Delete recent messages in this channel (1-100)."""
     if not user_is_staff(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()))
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You don't have permission to use this command.", color=discord.Color.red()), ephemeral=True)
         return
 
-    await ctx.channel.purge(limit=amount + 1)
-    msg = await ctx.send(embed=discord.Embed(description=f"{EMOJIS['success']} Cleared {amount} messages.", color=discord.Color.green()))
-    await msg.delete(delay=3)
+    if ctx.interaction is not None:
+        await ctx.defer(ephemeral=True)
+        deleted = await ctx.channel.purge(limit=amount)
+        await ctx.send(embed=discord.Embed(description=f"{EMOJIS['success']} Cleared {len(deleted)} messages.", color=discord.Color(0x2ECC71)), ephemeral=True)
+    else:
+        await ctx.channel.purge(limit=amount + 1)
+        msg = await ctx.send(embed=discord.Embed(description=f"{EMOJIS['success']} Cleared {amount} messages.", color=discord.Color(0x2ECC71)))
+        await msg.delete(delay=3)
+    await audit(ctx.guild, f"Messages cleared: {amount} in {ctx.channel.mention} | By: {ctx.author}")
 
 
-@bot.command(name="mute")
+@bot.hybrid_command(name="mute")
 @commands.guild_only()
 async def mute(ctx, member: discord.Member, *, reason="No reason provided"):
     """Timeouts a member."""
@@ -1148,6 +1429,7 @@ async def mute(ctx, member: discord.Member, *, reason="No reason provided"):
 
     from datetime import timedelta
     try:
+        suppress_log(ctx.guild.id, member.id, "timeout")
         await member.timeout(timedelta(minutes=10), reason=f"{reason} (Muted by {ctx.author})")
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Timed out {member.mention} for 10 minutes.", color=discord.Color.orange()))
         await audit(ctx.guild, f"Member timed out: {member} ({member.id}) | Reason: {reason} | By: {ctx.author}")
@@ -1159,14 +1441,14 @@ async def mute(ctx, member: discord.Member, *, reason="No reason provided"):
 # UTILITY & INFO COMMANDS
 # =========================
 
-@bot.command(name="ping")
+@bot.hybrid_command(name="ping")
 @commands.guild_only()
 async def ping(ctx):
     """Shows bot latency."""
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Pong! Latency: `{round(bot.latency * 1000)}ms`", color=discord.Color(0x2ECC71)))
 
 
-@bot.command(name="serverinfo")
+@bot.hybrid_command(name="serverinfo")
 @commands.guild_only()
 async def serverinfo(ctx):
     """Shows server info."""
@@ -1178,7 +1460,7 @@ async def serverinfo(ctx):
     await ctx.reply(embed=embed)
 
 
-@bot.command(name="userinfo")
+@bot.hybrid_command(name="userinfo")
 @commands.guild_only()
 async def userinfo(ctx, member: discord.Member = None):
     """Shows user info."""
@@ -1190,7 +1472,7 @@ async def userinfo(ctx, member: discord.Member = None):
     await ctx.reply(embed=embed)
 
 
-@bot.command(name="avatar")
+@bot.hybrid_command(name="avatar")
 @commands.guild_only()
 async def avatar(ctx, member: discord.Member = None):
     """Shows user avatar."""
@@ -1204,14 +1486,14 @@ async def avatar(ctx, member: discord.Member = None):
 # FUN & MISC COMMANDS
 # =========================
 
-@bot.command(name="coinflip")
+@bot.hybrid_command(name="coinflip")
 async def coinflip(ctx):
     """Flips a coin."""
     result = random.choice(["Heads", "Tails"])
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} The coin landed on: **{result}**", color=discord.Color(0x2ECC71)))
 
 
-@bot.command(name="roll")
+@bot.hybrid_command(name="roll")
 async def roll(ctx):
     """Rolls a dice (1-6)."""
     result = random.randint(1, 6)
@@ -1222,7 +1504,7 @@ async def roll(ctx):
 # SETUP COMMANDS (RANKS ADD / CLEAR)
 # =========================
 
-@bot.group(invoke_without_command=True)
+@bot.hybrid_group(name="ranks", invoke_without_command=True)
 @commands.guild_only()
 async def ranks(ctx):
     """Shows current rank ladder configuration."""
@@ -1231,7 +1513,7 @@ async def ranks(ctx):
         return
 
     ladder = config.get("rank_ladders", {}).get(str(ctx.guild.id), [])
-    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else f"Not configured. Use `{get_server_prefix(ctx.guild.id)}ranks add @role`"
+    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else f"Not configured. Use `/ranks add @role`"
     
     embed = discord.Embed(
         title=f"{EMOJIS['ladder']} Staff Rank Ladder",
@@ -1298,9 +1580,10 @@ async def ranks_clear(ctx):
     await ctx.reply(embed=embed)
 
 
-@bot.command(name="setstaffsupervisor")
+@bot.hybrid_command(name="setstaffsupervisor")
 @commands.guild_only()
 async def setstaffsupervisor(ctx, assigned_role: discord.Role):
+    """Set the supervisor role."""
     if not user_is_owner(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
@@ -1310,9 +1593,10 @@ async def setstaffsupervisor(ctx, assigned_role: discord.Role):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Supervisor role set to {assigned_role.mention}.", color=discord.Color.green()))
 
 
-@bot.command(name="setpromodemo")
+@bot.hybrid_command(name="setpromodemo")
 @commands.guild_only()
 async def setpromodemo(ctx, channel: discord.TextChannel):
+    """Set the promotion and demotion announcement channel."""
     if not user_is_owner(ctx):
         await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
         return
@@ -1322,19 +1606,35 @@ async def setpromodemo(ctx, channel: discord.TextChannel):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Promo channel set to {channel.mention}.", color=discord.Color.green()))
 
 
-@bot.command(name="setaudit")
+@bot.hybrid_command(name="setlogs", aliases=["setaudit"])
 @commands.guild_only()
-async def setaudit(ctx, channel: discord.TextChannel):
+async def setlogs(ctx, channel: discord.TextChannel):
+    """Set the channel where all server logs are sent."""
     if not user_is_owner(ctx):
-        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()))
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()), ephemeral=True)
         return
 
     config["audit_channels"][str(ctx.guild.id)] = channel.id
     save_config()
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Audit channel set to {channel.mention}.", color=discord.Color.green()))
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Logs will now be sent to {channel.mention}.", color=discord.Color(0x2ECC71)))
 
 
-@bot.command(name="staffsettings")
+@bot.hybrid_command(name="logtoggle")
+@commands.guild_only()
+async def logtoggle(ctx, category: Literal["messages", "members", "voice", "server", "moderation", "tickets"], state: Literal["on", "off"]):
+    """Turn a log category on or off."""
+    if not user_is_owner(ctx):
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the bot owner or server owner can use this command.", color=discord.Color.red()), ephemeral=True)
+        return
+
+    settings = config.setdefault("log_settings", {}).setdefault(str(ctx.guild.id), {})
+    settings[category] = state == "on"
+    save_config()
+    status = "\n".join(f"{EMOJIS['success'] if log_category_enabled(ctx.guild.id, key) else EMOJIS['error']} {label}" for key, label in LOG_CATEGORIES.items())
+    await ctx.reply(embed=discord.Embed(title=f"{EMOJIS['audit']} Log categories", description=status, color=discord.Color(0x2ECC71)))
+
+
+@bot.hybrid_command(name="staffsettings")
 @commands.guild_only()
 async def staffsettings(ctx):
     """Displays current server staff configurations and rank ladder."""
@@ -1351,7 +1651,7 @@ async def staffsettings(ctx):
     promo_channel = ctx.guild.get_channel(int(promo_id)) if promo_id else None
     audit_channel = ctx.guild.get_channel(int(audit_id)) if audit_id else None
     
-    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else f"Not configured (`{get_server_prefix(ctx.guild.id)}ranks add @role`)"
+    ladder_str = " -> ".join([f"<@&{r_id}>" for r_id in ladder]) if ladder else f"Not configured (`/ranks add @role`)"
 
     embed = discord.Embed(
         title=f"{EMOJIS['gear']} Egg Manager • Server Settings",
@@ -1361,17 +1661,17 @@ async def staffsettings(ctx):
 
     embed.add_field(
         name=f"{EMOJIS['shield']} Supervisor Role",
-        value=supervisor.mention if supervisor else f"Not configured (`{get_server_prefix(ctx.guild.id)}setstaffsupervisor @role`)",
+        value=supervisor.mention if supervisor else f"Not configured (`/setstaffsupervisor @role`)",
         inline=False
     )
     embed.add_field(
         name=f"{EMOJIS['announcement']} Announcement Channel",
-        value=promo_channel.mention if promo_channel else f"Not configured (`{get_server_prefix(ctx.guild.id)}setpromodemo #channel`)",
+        value=promo_channel.mention if promo_channel else f"Not configured (`/setpromodemo #channel`)",
         inline=False
     )
     embed.add_field(
         name=f"{EMOJIS['audit']} Audit Log Channel",
-        value=audit_channel.mention if audit_channel else f"Not configured (`{get_server_prefix(ctx.guild.id)}setaudit #channel`)",
+        value=audit_channel.mention if audit_channel else f"Not configured (`/setlogs #channel`)",
         inline=False
     )
     embed.add_field(
@@ -1397,7 +1697,7 @@ async def staffsettings(ctx):
 # EXTRA OWNER & BOT ACTIVITY COMMANDS
 # =========================
 
-@bot.command(name="addextraowner")
+@bot.hybrid_command(name="addextraowner")
 @commands.guild_only()
 async def addextraowner(ctx, member: discord.Member):
     """Give a member owner-level bot permissions in this server."""
@@ -1416,7 +1716,7 @@ async def addextraowner(ctx, member: discord.Member):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Added {member.mention} as an extra owner for this server.", color=discord.Color.green()))
 
 
-@bot.command(name="removextraowner", aliases=["removeextraowner"])
+@bot.hybrid_command(name="removextraowner", aliases=["removeextraowner"])
 @commands.guild_only()
 async def removextraowner(ctx, member: discord.Member):
     """Remove a member's owner-level bot permissions in this server."""
@@ -1451,7 +1751,7 @@ async def apply_bot_activity(activity_type, text):
     await bot.change_presence(activity=activity, status=discord.Status.online)
 
 
-@bot.command(name="setactivity")
+@bot.hybrid_command(name="setactivity")
 @commands.guild_only()
 async def setactivity(ctx, activity: str, *, text: str):
     """Set the bot's global status, for example >setactivity playing Egg Manager."""
@@ -1628,13 +1928,13 @@ async def call_ai(guild_id, user_id, prompt, user_name=None, guild_name=None):
 # COMMANDS
 # =========================
 
-@bot.command(name="ask", aliases=["ai", "chat"])
+@bot.hybrid_command(name="ask", aliases=["ai", "chat"])
 @commands.guild_only()
 async def ask_ai(ctx, *, prompt: str):
     """Chat with Egg Manager AI using Hugging Face."""
     prompt = prompt.strip()
     if not prompt:
-        return await ctx.reply("Ask me something after the command, for example: `>ask explain how a computer works`", mention_author=False)
+        return await ctx.reply("Ask me something after the command, for example: `/ask explain how a computer works`", mention_author=False)
     if len(prompt) > 2000:
         return await ctx.reply("Please keep each message under 2,000 characters.", mention_author=False)
     
@@ -1658,7 +1958,7 @@ async def ask_ai(ctx, *, prompt: str):
         await ctx.reply(answer[start:start + 1900], mention_author=False, allowed_mentions=discord.AllowedMentions.none())
 
 
-@bot.command(name="clearai", aliases=["resetai"])
+@bot.hybrid_command(name="clearai", aliases=["resetai"])
 @commands.guild_only()
 async def clear_ai_history(ctx):
     """Clear your own AI conversation memory in this server."""
@@ -1666,7 +1966,7 @@ async def clear_ai_history(ctx):
     _save_ai_memory()
     await ctx.reply("Your AI chat memory has been cleared. Only yours; nobody else's was touched.", mention_author=False)
     
-@bot.command(name="aimodels")
+@bot.hybrid_command(name="aimodels")
 @commands.guild_only()
 async def ai_models(ctx):
     """Owner only: list the chat model IDs your AI key can use right now."""
@@ -1690,7 +1990,7 @@ async def ai_models(ctx):
     await ctx.reply(text[:1900], mention_author=False)
 
 
-@bot.command(name="setaichannel")
+@bot.hybrid_command(name="setaichannel")
 @commands.guild_only()
 async def set_ai_channel(ctx, channel: discord.TextChannel = None):
     """Set the channel where the bot chats with the AI. Run with no channel to turn it off."""
@@ -1704,7 +2004,7 @@ async def set_ai_channel(ctx, channel: discord.TextChannel = None):
         channels.pop(gid, None)
         if not save_config():
             return await ctx.reply("Could not save the setting. Try again.", mention_author=False)
-        return await ctx.reply("AI channel disabled. Use `>setaichannel #channel` to set one.", mention_author=False)
+        return await ctx.reply("AI channel disabled. Use `/setaichannel #channel` to set one.", mention_author=False)
 
     channels[gid] = str(channel.id)
     if not save_config():
@@ -1712,18 +2012,20 @@ async def set_ai_channel(ctx, channel: discord.TextChannel = None):
     await ctx.reply(f"AI chat is now active in {channel.mention}.", mention_author=False)
 
 
-@bot.command(name="help")
+@bot.hybrid_command(name="help")
 async def help_command(ctx):
-    prefix = get_server_prefix(ctx.guild.id if ctx.guild else None)
-    embed = discord.Embed(title=f"{EMOJIS['gear']} Egg Manager • Command Center", description="Full command list • Prefix varies by server.", color=discord.Color(0x2ECC71))
-    embed.add_field(name=f"{EMOJIS['shield']} Staff & Moderation", value=f"`{prefix}promo`, `{prefix}demo`, `{prefix}super`, `{prefix}superintro`, `{prefix}staffintro`, `{prefix}staff`, `{prefix}role`, `{prefix}steal`, `{prefix}kick`, `{prefix}ban`, `{prefix}clear`, `{prefix}mute`", inline=False)
-    embed.add_field(name=f"{EMOJIS['ticket']} Setup & Utility", value=f"`{prefix}dashboard`, `{prefix}ticketsetup`, `{prefix}ranks add @role`, `{prefix}ranks clear`, `{prefix}setstaffsupervisor`, `{prefix}setpromodemo`, `{prefix}setaudit`, `{prefix}staffsettings`, `{prefix}addextraowner @member`, `{prefix}removextraowner @member`, `{prefix}setactivity <type> <text>`, `{prefix}ping`, `{prefix}serverinfo`, `{prefix}userinfo [@member]`, `{prefix}avatar [@member]`, `{prefix}coinflip`, `{prefix}roll`", inline=False)
-    embed.add_field(name="🤖 AI Chat & Tasks", value=f"Chat normally in the channel set with `{prefix}setaichannel #channel`; `{prefix}setaichannel` with no channel disables it. Also: `{prefix}ask <message>` (aliases: `{prefix}ai`, `{prefix}chat`), `{prefix}clearai`, `{prefix}aimodels`, `{prefix}task <description>`, `{prefix}assign @member <task>` (supervisors), `{prefix}tasks [@member]`, `{prefix}done <task-id>`", inline=False)
-    embed.add_field(name="🛡️ Server & Bot Controls", value=f"`{prefix}blacklist @member [reason]`, `{prefix}unblacklist @member`, `{prefix}disable`, `{prefix}enable`, `{prefix}shutdown`, `{prefix}restart`", inline=False)
+    """Show every Egg Manager command."""
+    embed = discord.Embed(title=f"{EMOJIS['gear']} Egg Manager \u2022 Command Center", description="All commands are slash commands. Type `/` to see them.", color=discord.Color(0x2ECC71))
+    embed.add_field(name=f"{EMOJIS['shield']} Staff & Moderation", value="`/promo`, `/demo`, `/super`, `/superintro`, `/staffintro`, `/staff`, `/role`, `/steal`, `/kick`, `/ban`, `/clear`, `/mute`", inline=False)
+    embed.add_field(name=f"{EMOJIS['ticket']} Tickets & Logs", value="`/ticketsetup`, `/ticket add`, `/ticket remove`, `/ticket close`, `/setlogs`, `/logtoggle`", inline=False)
+    embed.add_field(name=f"{EMOJIS['ladder']} Leveling", value="`/rank [member]`, `/leaderboard`, `/leveling on|off`, `/setlevelchannel`, `/setlevel`, `/resetxp`, `/levelrole add`, `/levelrole remove`, `/levelrole list`", inline=False)
+    embed.add_field(name=f"{EMOJIS['gear']} Setup & Utility", value="`/dashboard`, `/ranks add`, `/ranks clear`, `/setstaffsupervisor`, `/setpromodemo`, `/staffsettings`, `/addextraowner`, `/removextraowner`, `/setactivity`, `/ping`, `/serverinfo`, `/userinfo`, `/avatar`, `/coinflip`, `/roll`", inline=False)
+    embed.add_field(name="\U0001F916 AI Chat", value="Chat normally in the channel set with `/setaichannel #channel` (run it with no channel to disable). Also: `/ask`, `/clearai`, `/aimodels`", inline=False)
+    embed.add_field(name="\U0001F6E1\ufe0f Server & Bot Controls", value="`/blacklist`, `/unblacklist`, `/disable`, `/enable`, `/shutdown`, `/restart`", inline=False)
     await ctx.reply(embed=embed, mention_author=False)
 
 
-@bot.command(name="blacklist")
+@bot.hybrid_command(name="blacklist")
 @commands.guild_only()
 async def blacklist_member(ctx, member: discord.Member, *, reason: str = "No reason provided"):
     """Block a member from using Egg Manager commands in this server."""
@@ -1746,7 +2048,7 @@ async def blacklist_member(ctx, member: discord.Member, *, reason: str = "No rea
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} {member.mention} is now blocked from using Egg Manager commands in this server. Reason: {reason}", color=discord.Color.green()))
 
 
-@bot.command(name="unblacklist", aliases=["pardon"])
+@bot.hybrid_command(name="unblacklist", aliases=["pardon"])
 @commands.guild_only()
 async def unblacklist_member(ctx, member: discord.Member):
     """Restore a member's access to Egg Manager commands in this server."""
@@ -1764,7 +2066,7 @@ async def unblacklist_member(ctx, member: discord.Member):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} {member.mention} can use Egg Manager commands again.", color=discord.Color.green()))
 
 
-@bot.command(name="disable")
+@bot.hybrid_command(name="disable")
 @commands.guild_only()
 async def disable_bot(ctx):
     """Disable regular bot commands in this server."""
@@ -1779,10 +2081,10 @@ async def disable_bot(ctx):
         else:
             config["disabled_guilds"][guild_id] = previous
         return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Could not save this setting. Try again.", color=discord.Color.red()))
-    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Regular commands are disabled for this server. Use `{get_server_prefix(ctx.guild.id)}enable` to turn them back on.", color=discord.Color.orange()))
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Regular commands are disabled for this server. Use `/enable` to turn them back on.", color=discord.Color.orange()))
 
 
-@bot.command(name="enable")
+@bot.hybrid_command(name="enable")
 @commands.guild_only()
 async def enable_bot(ctx):
     """Enable bot commands in this server."""
@@ -1797,25 +2099,27 @@ async def enable_bot(ctx):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Bot commands are enabled again in this server.", color=discord.Color.green()))
 
 
-@bot.command(name="shutdown")
+@bot.hybrid_command(name="shutdown")
 async def shutdown_bot(ctx):
     """Stop the bot process. Bot owner only."""
     if not OWNER_ID or ctx.author.id != OWNER_ID:
         return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the configured bot owner can shut down the bot.", color=discord.Color.red()))
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Egg Manager is shutting down.", color=discord.Color.orange()))
+    save_config()
     await bot.close()
 
 
-@bot.command(name="restart")
+@bot.hybrid_command(name="restart")
 async def restart_bot(ctx):
     """Restart the bot process. Bot owner only."""
     if not OWNER_ID or ctx.author.id != OWNER_ID:
         return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the configured bot owner can restart the bot.", color=discord.Color.red()))
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Egg Manager is restarting.", color=discord.Color.green()))
+    save_config()
     await asyncio.sleep(1)
     os.execv(sys.executable, [sys.executable] + sys.argv)
 
-@bot.command(name="dashboard")
+@bot.hybrid_command(name="dashboard")
 async def dashboard(ctx):
     """Send the Egg Manager dashboard link."""
     embed = discord.Embed(
@@ -1837,7 +2141,7 @@ def get_gay_list(guild_id):
         config["gay_list"] = {}
     return config["gay_list"].setdefault(str(guild_id), [])
 
-@bot.command(name="gay")
+@bot.hybrid_command(name="gay")
 @commands.guild_only()
 async def gay_list_cmd(ctx):
     """Shows the list of added members."""
@@ -1845,7 +2149,7 @@ async def gay_list_cmd(ctx):
     members_list = get_gay_list(guild_id)
     
     if not members_list:
-        await ctx.reply(embed=discord.Embed(description="🏳️‍🌈 The list is currently empty. Use `>addgay @member` to add someone.", color=discord.Color(0x2ECC71)))
+        await ctx.reply(embed=discord.Embed(description="🏳️‍🌈 The list is currently empty. Use `/addgay @member` to add someone.", color=discord.Color(0x2ECC71)))
         return
         
     mentions = [f"<@&{uid}>" if not str(uid).isdigit() else f"<@{uid}>" for uid in members_list]
@@ -1864,7 +2168,7 @@ async def gay_list_cmd(ctx):
     embed.set_footer(text=f"Requested by {ctx.author.display_name}")
     await ctx.reply(embed=embed, mention_author=False)
 
-@bot.command(name="addgay")
+@bot.hybrid_command(name="addgay")
 @commands.guild_only()
 async def add_gay_cmd(ctx, member: discord.Member):
     """Adds a member to the list (Supervisor/Owner only)."""
@@ -1885,7 +2189,7 @@ async def add_gay_cmd(ctx, member: discord.Member):
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Added {member.mention} to the list!", color=discord.Color.green()))
     await audit(ctx.guild, f"Member {member} ({member.id}) added to gay list by {ctx.author}")
 
-@bot.command(name="removegay")
+@bot.hybrid_command(name="removegay")
 @commands.guild_only()
 async def remove_gay_cmd(ctx, member: discord.Member):
     """Removes a member from the list (Supervisor/Owner only)."""
@@ -1910,7 +2214,7 @@ async def remove_gay_cmd(ctx, member: discord.Member):
 # CHECKGAY COMMAND
 # =========================
 
-@bot.command(name="checkgay")
+@bot.hybrid_command(name="checkgay")
 @commands.guild_only()
 async def checkgay(ctx, member: discord.Member = None):
     """Checks a member's percentage (0% for the bot owner)."""
@@ -1939,7 +2243,7 @@ async def checkgay(ctx, member: discord.Member = None):
 # PRANK NUKE COMMAND
 # =========================
 
-@bot.command(name="nuke")
+@bot.hybrid_command(name="nuke")
 @commands.guild_only()
 async def prank_nuke(ctx):
     """Sends a fake server nuke warning followed by a separate prank message."""
@@ -2049,6 +2353,10 @@ async def _mod_execute(guild, requester, action, target, reason, minutes):
     if blocked:
         return f"{EMOJIS['error']} {blocked}"
     full_reason = f"{reason} (by {requester} via AI channel)"[:480]
+    if action in ("ban", "kick", "mute", "unmute") and isinstance(target, discord.Member):
+        suppress_log(guild.id, target.id, {"ban": "ban", "kick": "kick"}.get(action, "timeout"))
+    elif action in ("ban", "unban"):
+        suppress_log(guild.id, target.id, action)
     try:
         if action == "ban":
             if isinstance(target, discord.Member):
@@ -2534,6 +2842,397 @@ async def handle_bot_mention(message, ctx, text):
 # EVENTS & STARTUP
 # =========================
 
+# =========================
+# LEVELING SYSTEM
+# =========================
+
+XP_COOLDOWN_SECONDS = 60
+LEVEL_COOLDOWN = {}
+
+
+def xp_for_next_level(level):
+    return 5 * level * level + 50 * level + 100
+
+
+def total_xp_for_level(level):
+    if level <= 0:
+        return 0
+    return (5 * (level - 1) * level * (2 * level - 1)) // 6 + 25 * level * (level - 1) + 100 * level
+
+
+def level_from_xp(xp):
+    level = 0
+    while xp >= total_xp_for_level(level + 1):
+        level += 1
+    return level
+
+
+def get_level_account(guild_id, user_id):
+    accounts = config.setdefault("levels", {}).setdefault(str(guild_id), {})
+    account = accounts.setdefault(str(user_id), {"xp": 0, "level": 0, "messages": 0})
+    account["xp"] = max(0, int(account.get("xp", 0)))
+    account["level"] = max(0, int(account.get("level", 0)))
+    account["messages"] = max(0, int(account.get("messages", 0)))
+    return account
+
+
+def get_level_settings(guild_id):
+    defaults = {"enabled": True, "channel": None}
+    return {**defaults, **config.get("level_settings", {}).get(str(guild_id), {})}
+
+
+def progress_bar(current, total, length=14):
+    filled = int(length * current / total) if total else 0
+    return "\u2588" * filled + "\u2591" * (length - filled)
+
+
+async def apply_level_roles(member, level):
+    rewards = config.get("level_roles", {}).get(str(member.guild.id), {})
+    to_add = []
+    for required, role_id in rewards.items():
+        role = member.guild.get_role(int(role_id))
+        if role and int(required) <= level and role not in member.roles and role < member.guild.me.top_role:
+            to_add.append(role)
+    if to_add:
+        try:
+            await member.add_roles(*to_add, reason=f"Level {level} reward")
+        except discord.HTTPException:
+            logging.warning("Could not give level roles to %s", member)
+
+
+async def announce_level_up(message, level, settings):
+    channel = message.channel
+    if settings.get("channel"):
+        configured = message.guild.get_channel(int(settings["channel"]))
+        if configured is not None:
+            channel = configured
+    embed = discord.Embed(
+        title=f"{EMOJIS['success']} Level Up!",
+        description=f"{message.author.mention} reached **level {level}**!",
+        color=discord.Color(0x2ECC71),
+    )
+    embed.set_thumbnail(url=message.author.display_avatar.url)
+    embed.set_footer(text="Egg Manager \u2022 Leveling")
+    try:
+        await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions(users=[message.author]))
+    except discord.HTTPException:
+        pass
+
+
+async def award_xp(message):
+    guild = message.guild
+    settings = get_level_settings(guild.id)
+    if not settings["enabled"] or not (message.content.strip() or message.attachments):
+        return
+    key = (guild.id, message.author.id)
+    now = time.monotonic()
+    if now - LEVEL_COOLDOWN.get(key, -999) < XP_COOLDOWN_SECONDS:
+        return
+    LEVEL_COOLDOWN[key] = now
+    account = get_level_account(guild.id, message.author.id)
+    account["xp"] += random.randint(15, 25)
+    account["messages"] += 1
+    new_level = level_from_xp(account["xp"])
+    leveled_up = new_level > account["level"]
+    account["level"] = new_level
+    mark_config_dirty()
+    if leveled_up:
+        await announce_level_up(message, new_level, settings)
+        if isinstance(message.author, discord.Member):
+            await apply_level_roles(message.author, new_level)
+
+
+@bot.hybrid_command(name="rank")
+@commands.guild_only()
+async def rank(ctx, member: discord.Member = None):
+    """Show your level and XP (or another member's)."""
+    member = member or ctx.author
+    account = get_level_account(ctx.guild.id, member.id)
+    accounts = config.get("levels", {}).get(str(ctx.guild.id), {})
+    ordered = sorted(accounts.items(), key=lambda item: int(item[1].get("xp", 0)), reverse=True)
+    position = next((index for index, (uid, _) in enumerate(ordered, start=1) if uid == str(member.id)), len(ordered) + 1)
+    level = account["level"]
+    into_level = account["xp"] - total_xp_for_level(level)
+    needed = xp_for_next_level(level)
+    embed = discord.Embed(title=f"{EMOJIS['ladder']} {member.display_name}'s Rank", color=discord.Color(0x2ECC71))
+    embed.set_thumbnail(url=member.display_avatar.url)
+    embed.add_field(name="Level", value=str(level), inline=True)
+    embed.add_field(name="Rank", value=f"#{position}", inline=True)
+    embed.add_field(name="Total XP", value=f"{account['xp']:,}", inline=True)
+    embed.add_field(name=f"Progress to level {level + 1}", value=f"`{progress_bar(into_level, needed)}` {into_level:,}/{needed:,} XP", inline=False)
+    embed.set_footer(text="Egg Manager \u2022 Leveling")
+    await ctx.reply(embed=embed, mention_author=False)
+
+
+@bot.hybrid_command(name="leaderboard", aliases=["top"])
+@commands.guild_only()
+async def leaderboard(ctx):
+    """Show the top 10 members by XP."""
+    accounts = config.get("levels", {}).get(str(ctx.guild.id), {})
+    ordered = sorted(accounts.items(), key=lambda item: int(item[1].get("xp", 0)), reverse=True)[:10]
+    if not ordered:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Nobody has earned XP yet. Start chatting!", color=discord.Color(0x2ECC71)))
+        return
+    lines = [f"**{index}.** <@{uid}> \u2014 Level **{data.get('level', 0)}** \u2022 {int(data.get('xp', 0)):,} XP" for index, (uid, data) in enumerate(ordered, start=1)]
+    embed = discord.Embed(title=f"{EMOJIS['ladder']} {ctx.guild.name} Leaderboard", description="\n".join(lines), color=discord.Color(0x2ECC71))
+    embed.set_footer(text="Egg Manager \u2022 Leveling")
+    await ctx.reply(embed=embed, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+
+
+async def require_level_admin(ctx):
+    if user_is_supervisor(ctx):
+        return True
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only owners or supervisors can use this command.", color=discord.Color.red()), ephemeral=True)
+    return False
+
+
+@bot.hybrid_command(name="leveling")
+@commands.guild_only()
+async def leveling(ctx, state: Literal["on", "off"]):
+    """Turn the leveling system on or off."""
+    if not await require_level_admin(ctx):
+        return
+    config.setdefault("level_settings", {}).setdefault(str(ctx.guild.id), {})["enabled"] = state == "on"
+    save_config()
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Leveling is now **{state}**.", color=discord.Color(0x2ECC71)))
+
+
+@bot.hybrid_command(name="setlevelchannel")
+@commands.guild_only()
+async def setlevelchannel(ctx, channel: discord.TextChannel = None):
+    """Set where level-ups are announced (empty = same channel)."""
+    if not await require_level_admin(ctx):
+        return
+    settings = config.setdefault("level_settings", {}).setdefault(str(ctx.guild.id), {})
+    settings["channel"] = channel.id if channel else None
+    save_config()
+    text = f"Level-ups will be announced in {channel.mention}." if channel else "Level-ups will be announced in the channel where the member levels up."
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} {text}", color=discord.Color(0x2ECC71)))
+
+
+@bot.hybrid_command(name="setlevel")
+@commands.guild_only()
+async def setlevel(ctx, member: discord.Member, level: commands.Range[int, 0, 200]):
+    """Set a member's level."""
+    if not await require_level_admin(ctx):
+        return
+    account = get_level_account(ctx.guild.id, member.id)
+    account["xp"] = total_xp_for_level(level)
+    account["level"] = level
+    save_config()
+    await apply_level_roles(member, level)
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Set {member.mention} to **level {level}**.", color=discord.Color(0x2ECC71)), allowed_mentions=discord.AllowedMentions.none())
+    await audit(ctx.guild, f"Level set: {member} ({member.id}) -> level {level} | By: {ctx.author}")
+
+
+@bot.hybrid_command(name="resetxp")
+@commands.guild_only()
+async def resetxp(ctx, member: discord.Member):
+    """Reset a member's XP and level."""
+    if not await require_level_admin(ctx):
+        return
+    config.setdefault("levels", {}).setdefault(str(ctx.guild.id), {}).pop(str(member.id), None)
+    save_config()
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Reset XP for {member.mention}.", color=discord.Color(0x2ECC71)), allowed_mentions=discord.AllowedMentions.none())
+    await audit(ctx.guild, f"XP reset: {member} ({member.id}) | By: {ctx.author}")
+
+
+@bot.hybrid_group(name="levelrole", invoke_without_command=True)
+@commands.guild_only()
+async def levelrole(ctx):
+    """Manage roles given at certain levels."""
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['ladder']} Use `/levelrole add`, `/levelrole remove` or `/levelrole list`.", color=discord.Color(0x2ECC71)))
+
+
+@levelrole.command(name="add")
+@commands.guild_only()
+async def levelrole_add(ctx, level: commands.Range[int, 1, 200], role: discord.Role):
+    """Give a role when members reach a level."""
+    if not await require_level_admin(ctx):
+        return
+    if role.is_default() or role.managed or role >= ctx.guild.me.top_role:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} I can't assign that role. Pick a role below my highest role.", color=discord.Color.red()), ephemeral=True)
+        return
+    config.setdefault("level_roles", {}).setdefault(str(ctx.guild.id), {})[str(level)] = role.id
+    save_config()
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} {role.mention} will be given at **level {level}**.", color=discord.Color(0x2ECC71)), allowed_mentions=discord.AllowedMentions.none())
+
+
+@levelrole.command(name="remove")
+@commands.guild_only()
+async def levelrole_remove(ctx, level: commands.Range[int, 1, 200]):
+    """Remove the role reward for a level."""
+    if not await require_level_admin(ctx):
+        return
+    removed = config.setdefault("level_roles", {}).setdefault(str(ctx.guild.id), {}).pop(str(level), None)
+    save_config()
+    text = f"Removed the reward for level {level}." if removed else f"No reward was set for level {level}."
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} {text}", color=discord.Color(0x2ECC71)))
+
+
+@levelrole.command(name="list")
+@commands.guild_only()
+async def levelrole_list(ctx):
+    """List all level role rewards."""
+    rewards = config.get("level_roles", {}).get(str(ctx.guild.id), {})
+    if not rewards:
+        await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} No level rewards yet. Add one with `/levelrole add`.", color=discord.Color(0x2ECC71)))
+        return
+    lines = [f"**Level {level}** \u2192 <@&{role_id}>" for level, role_id in sorted(rewards.items(), key=lambda item: int(item[0]))]
+    await ctx.reply(embed=discord.Embed(title=f"{EMOJIS['ladder']} Level Rewards", description="\n".join(lines), color=discord.Color(0x2ECC71)), allowed_mentions=discord.AllowedMentions.none())
+
+
+# =========================
+# LOG EVENTS
+# =========================
+
+def _log_skip_channel(guild, channel):
+    if channel is None:
+        return True
+    log_id = guild_setting("audit_channels", guild.id)
+    if log_id and channel.id == int(log_id):
+        return True
+    return (getattr(channel, "name", "") or "").startswith("ticket-")
+
+
+def _clip(text, limit=1000):
+    text = text or ""
+    return text if len(text) <= limit else text[: limit - 1] + "\u2026"
+
+
+@bot.event
+async def on_raw_message_delete(payload):
+    if payload.guild_id is None:
+        return
+    guild = bot.get_guild(payload.guild_id)
+    if guild is None:
+        return
+    channel = guild.get_channel(payload.channel_id)
+    if _log_skip_channel(guild, channel):
+        return
+    message = payload.cached_message
+    if message is None:
+        await send_log(guild, "messages", f"{EMOJIS['error']} Message Deleted", f"An older message was deleted in {channel.mention}.", fields=[("Message ID", payload.message_id, True)], color=discord.Color.orange())
+        return
+    if message.author.bot:
+        return
+    fields = [("Channel", channel.mention, True), ("Content", _clip(message.content) or "*no text*", False)]
+    if message.attachments:
+        fields.append(("Attachments", "\n".join(a.filename for a in message.attachments), False))
+    await send_log(guild, "messages", f"{EMOJIS['error']} Message Deleted", fields=fields, user=message.author, color=discord.Color.orange())
+
+
+@bot.event
+async def on_message_edit(before, after):
+    if after.guild is None or after.author.bot or before.content == after.content:
+        return
+    if _log_skip_channel(after.guild, after.channel):
+        return
+    await send_log(
+        after.guild, "messages", f"{EMOJIS['audit']} Message Edited",
+        fields=[("Channel", f"{after.channel.mention} ([jump]({after.jump_url}))", False), ("Before", _clip(before.content) or "*no text*", False), ("After", _clip(after.content) or "*no text*", False)],
+        user=after.author,
+    )
+
+
+@bot.event
+async def on_member_join(member):
+    await send_log(
+        member.guild, "members", f"{EMOJIS['welcome']} Member Joined", f"{member.mention} joined the server.",
+        fields=[("Account created", discord.utils.format_dt(member.created_at, "R"), True), ("Member count", member.guild.member_count, True)],
+        user=member,
+    )
+
+
+@bot.event
+async def on_member_remove(member):
+    if log_suppressed(member.guild.id, member.id, "kick", "ban"):
+        return
+    roles = [role.mention for role in member.roles if not role.is_default()]
+    fields = [("Joined", discord.utils.format_dt(member.joined_at, "R") if member.joined_at else "Unknown", True)]
+    if roles:
+        fields.append(("Roles", _clip(" ".join(roles)), False))
+    await send_log(member.guild, "members", f"{EMOJIS['warning']} Member Left", f"{member.mention} left the server.", fields=fields, user=member, color=discord.Color.orange())
+
+
+@bot.event
+async def on_member_update(before, after):
+    guild = after.guild
+    if before.nick != after.nick:
+        await send_log(guild, "members", f"{EMOJIS['audit']} Nickname Changed", fields=[("Before", before.nick or "*none*", True), ("After", after.nick or "*none*", True)], user=after)
+    added = [role for role in after.roles if role not in before.roles]
+    removed = [role for role in before.roles if role not in after.roles]
+    if added or removed:
+        fields = []
+        if added:
+            fields.append(("Roles added", " ".join(role.mention for role in added), False))
+        if removed:
+            fields.append(("Roles removed", " ".join(role.mention for role in removed), False))
+        await send_log(guild, "members", f"{EMOJIS['ladder']} Roles Updated", fields=fields, user=after)
+    if before.timed_out_until != after.timed_out_until and not log_suppressed(guild.id, after.id, "timeout"):
+        if after.timed_out_until:
+            await send_log(guild, "moderation", f"{EMOJIS['warning']} Member Timed Out", fields=[("Until", discord.utils.format_dt(after.timed_out_until, "R"), True)], user=after, color=discord.Color.orange())
+        else:
+            await send_log(guild, "moderation", f"{EMOJIS['success']} Timeout Removed", user=after)
+
+
+@bot.event
+async def on_member_ban(guild, user):
+    if log_suppressed(guild.id, user.id, "ban"):
+        return
+    await send_log(guild, "moderation", f"{EMOJIS['error']} Member Banned", f"{user.mention} was banned.", user=user, color=discord.Color.red())
+
+
+@bot.event
+async def on_member_unban(guild, user):
+    if log_suppressed(guild.id, user.id, "unban"):
+        return
+    await send_log(guild, "moderation", f"{EMOJIS['success']} Member Unbanned", f"{user.mention} was unbanned.", user=user)
+
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if member.bot or before.channel == after.channel:
+        return
+    if before.channel is None:
+        title, text = f"{EMOJIS['success']} Joined Voice", f"{member.mention} joined {after.channel.mention}."
+    elif after.channel is None:
+        title, text = f"{EMOJIS['warning']} Left Voice", f"{member.mention} left {before.channel.mention}."
+    else:
+        title, text = f"{EMOJIS['audit']} Moved Voice", f"{member.mention} moved from {before.channel.mention} to {after.channel.mention}."
+    await send_log(member.guild, "voice", title, text, user=member)
+
+
+@bot.event
+async def on_guild_channel_create(channel):
+    if _log_skip_channel(channel.guild, channel):
+        return
+    await send_log(channel.guild, "server", f"{EMOJIS['success']} Channel Created", f"{channel.mention} (`{channel.name}`) was created.")
+
+
+@bot.event
+async def on_guild_channel_delete(channel):
+    if _log_skip_channel(channel.guild, channel):
+        return
+    await send_log(channel.guild, "server", f"{EMOJIS['error']} Channel Deleted", f"`#{channel.name}` was deleted.", color=discord.Color.orange())
+
+
+@bot.event
+async def on_guild_channel_update(before, after):
+    if before.name != after.name and not _log_skip_channel(after.guild, after):
+        await send_log(after.guild, "server", f"{EMOJIS['audit']} Channel Renamed", fields=[("Before", f"#{before.name}", True), ("After", after.mention, True)])
+
+
+@bot.event
+async def on_guild_role_create(role):
+    await send_log(role.guild, "server", f"{EMOJIS['success']} Role Created", f"{role.mention} (`{role.name}`) was created.")
+
+
+@bot.event
+async def on_guild_role_delete(role):
+    await send_log(role.guild, "server", f"{EMOJIS['error']} Role Deleted", f"`{role.name}` was deleted.", color=discord.Color.orange())
+
+
 @bot.event
 async def on_message(message):
     if message.author.bot:
@@ -2545,6 +3244,11 @@ async def on_message(message):
         ai_channel_id = config.get("ai_channels", {}).get(str(guild.id))
         is_blacklisted = str(message.author.id) in {str(uid) for uid in config.get("blacklists", {}).get(str(guild.id), [])}
         is_disabled = config.get("disabled_guilds", {}).get(str(guild.id), False)
+        if not ctx.valid and not is_blacklisted and not is_disabled:
+            try:
+                await award_xp(message)
+            except Exception:
+                logging.exception("Could not award XP")
         mention_re = rf"<@!?{bot.user.id}>"
         if (re.search(mention_re, message.content) and not ctx.valid
                 and not is_blacklisted and not is_disabled):
@@ -2585,15 +3289,15 @@ async def on_message(message):
 
 @bot.event
 async def on_ready():
-    bot.add_view(TicketSetupView())
-    bot.add_view(TicketCloseView())
     await install_application_emojis()
+    bot.add_view(TicketSetupView())
+    bot.add_view(TicketControlView())
     if not getattr(bot, "_slash_commands_synced", False):
         try:
             await bot.tree.sync()
             bot._slash_commands_synced = True
             logging.info("Synced Egg Manager slash commands")
-        except discord.HTTPException:
+        except Exception:
             logging.exception("Could not sync slash commands; check that the app has the applications.commands scope")
     activity_settings = config.get("activity", {})
     if activity_settings.get("type") in ACTIVITY_TYPES and activity_settings.get("text"):
@@ -2620,18 +3324,12 @@ async def on_command_error(ctx, error):
 async def main():
     load_config()
     asyncio.create_task(start_web_server())
+    asyncio.create_task(config_autosave_loop())
     await bot.start(TOKEN)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
-
-
-
-
 
 
 

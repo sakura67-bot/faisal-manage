@@ -8,6 +8,7 @@ import asyncio
 import secrets
 import sys
 import time
+import datetime
 import urllib.parse
 import aiohttp
 import discord
@@ -232,7 +233,7 @@ async def handle_api_guild(request):
         "embed_color": "#%06X" % parse_embed_color(embed_settings.get("color")),
         "embed_footer": embed_settings.get("footer", "MEMBERS RUSH"),
         "ticket_title": ticket_settings.get("title", "Support Ticket Center"),
-        "ticket_description": ticket_settings.get("description", "Choose a ticket type from the dropdown below to open a private channel with our staff team."),
+        "ticket_description": ticket_settings.get("description", default_ticket_description()),
         "activity_type": activity_settings.get("type", "playing"),
         "activity_text": activity_settings.get("text", ""),
         "can_set_activity": bool(OWNER_ID and str(session["user"]["id"]) == str(OWNER_ID)),
@@ -276,7 +277,7 @@ async def handle_api_save_settings(request):
         return response_json_error("Choose a valid 6-digit embed color.")
     footer = str(data.get("embed_footer", "MEMBERS RUSH"))[:200]
     ticket_title = str(data.get("ticket_title", "Support Ticket Center")).strip()
-    ticket_description = str(data.get("ticket_description", "Choose a ticket type from the dropdown below to open a private channel with our staff team.")).strip()
+    ticket_description = str(data.get("ticket_description", default_ticket_description())).strip()
     if not ticket_title or len(ticket_title) > 100 or len(ticket_description) > 2000:
         return response_json_error("Ticket title must be 1–100 characters and description no more than 2,000.")
     config.setdefault("prefixes", {})[gid] = prefix
@@ -529,7 +530,9 @@ config = {
     "levels": {},
     "level_settings": {},
     "level_roles": {},
-    "log_settings": {}
+    "log_settings": {},
+    "antinuke": {},
+    "daily_invites": {}
 }
 
 
@@ -617,8 +620,21 @@ def get_embed_settings(guild_id):
     return {**defaults, **config.get("embed_settings", {}).get(str(guild_id), {})}
 
 
+def default_ticket_description():
+    b = EMOJIS["bullet"]
+    return (
+        "Need help, want to report something, or ready to make a purchase? "
+        "Pick a ticket type from the dropdown below and a **private channel** will open just for you and our team.\n\n"
+        "**Before you open a ticket**\n"
+        f"{b} Be clear and detailed so we can help you faster\n"
+        f"{b} One issue per ticket — please don't ping staff repeatedly\n"
+        f"{b} Our AI assistant replies instantly; press **Request Staff** if you'd like a human\n\n"
+        "Thanks for your patience — we've got you. 💚"
+    )
+
+
 def get_ticket_settings(guild_id):
-    defaults = {"title": f"{EMOJIS['announcement']} Support Ticket Center", "description": "Choose a ticket type from the dropdown below to open a private channel with our staff team."}
+    defaults = {"title": f"{EMOJIS['announcement']} Support Ticket Center", "description": default_ticket_description()}
     return {**defaults, **config.get("ticket_settings", {}).get(str(guild_id), {})}
 
 
@@ -2576,7 +2592,7 @@ async def help_command(ctx):
     embed.add_field(name="🪙 Economy & Casino", value="`>bal`, `>dep`, `>with`, `>pay`, `>interest`, `>daily`, `>weekly`, `>monthly`, `>work`, `>beg`, `>search`, `>fish`, `>hunt`, `>mine`, `>stream`, `>crime`, `>rob`, `>heist`, `>bounty`, `>claimbounty`, `>slots`, `>coinbet`, `>dicebet`, `>blackjack`, `>roulette`, `>crash`, `>duel`, `>shop`, `>buy`, `>sell`, `>inv`, `>use`, `>tradeitem`, `>stocks`, `>buystock`, `>sellstock`, `>portfolio`, `>pets`, `>adopt`, `>pet`, `>passivemode`, `>prestige`, `>richest`, `>ecostats`", inline=False)
     embed.add_field(name="🏦 Admin Economy", value="`>addmoney`, `>removemoney`, `>setmoney`, `>resetuser`, `>reseteconomy`, `>ecogiveall`, `>additem`, `>removeitem`, `>giveitem`, `>takeitem`, `>setcurrency`, `>setstartbal`, `>setdaily`, `>setwork`, `>settax`, `>setinterest`, `>setbanklimit`, `>economytoggle`, `>ecosettings`", inline=False)
     embed.add_field(name=f"{EMOJIS['ladder']} Leveling", value="`>rank`, `>leaderboard`, `>leveling on|off`, `>setlevelchannel`, `>setlevel`, `>resetxp`, `>levelrole add|remove|list`", inline=False)
-    embed.add_field(name=f"{EMOJIS['gear']} Setup & Utility", value="`>setprefix`, `>dashboard`, `>ranks add|clear`, `>setstaffsupervisor`, `>setpromo`, `>setdemo`, `>staffsettings`, `>addextraowner`, `>removextraowner`, `>setactivity`, `>ping`, `>serverinfo`, `>userinfo`, `>avatar`, `>coinflip`, `>roll`", inline=False)
+    embed.add_field(name=f"{EMOJIS['gear']} Setup & Utility", value="`>setprefix`, `>dashboard`, `>ranks add|clear`, `>setstaffsupervisor`, `>setpromo`, `>setdemo`, `>staffsettings`, `>addextraowner`, `>removextraowner`, `>setactivity`, `>antinuke`, `>whitelist`, `>setdailyinvite`, `>dailyinvites`, `>ping`, `>serverinfo`, `>userinfo`, `>avatar`, `>coinflip`, `>roll`", inline=False)
     embed.add_field(name="\U0001F916 AI & Controls", value="`>setaichannel`, `>ask`, `>clearai`, `>aimodels`, `>blacklist`, `>unblacklist`, `>disable`, `>enable`, `>shutdown`, `>restart`", inline=False)
     await ctx.reply(embed=embed, mention_author=False)
 
@@ -5512,6 +5528,8 @@ async def on_member_join(member):
         INVITE_CACHE[member.guild.id] = {inv.code: inv.uses or 0 for inv in invites}
         if used and used.inviter:
             add_staff_stat(member.guild.id, used.inviter.id, "invites")
+            if not member.bot and used.inviter.id != member.id:
+                record_daily_invite(member.guild.id, used.inviter.id, member.id)
     except (discord.Forbidden, discord.HTTPException):
         pass
     await send_log(
@@ -5523,6 +5541,7 @@ async def on_member_join(member):
 
 @bot.event
 async def on_member_remove(member):
+    forget_daily_invite(member.guild.id, member.id)
     if log_suppressed(member.guild.id, member.id, "kick", "ban"):
         return
     roles = [role.mention for role in member.roles if not role.is_default()]
@@ -5676,6 +5695,466 @@ async def on_message(message):
     await bot.process_commands(message)
 
 
+# ==============================================================================
+# STRONG ANTI-NUKE
+# ==============================================================================
+
+AN_A = discord.AuditLogAction
+# action: (max actions allowed inside the window, window in seconds). Going OVER the max = punishment.
+ANTINUKE_LIMITS = {
+    AN_A.channel_delete: (1, 10),
+    AN_A.channel_create: (3, 10),
+    AN_A.role_delete: (1, 10),
+    AN_A.role_create: (3, 10),
+    AN_A.ban: (2, 10),
+    AN_A.kick: (2, 10),
+    AN_A.webhook_create: (1, 10),
+    AN_A.emoji_delete: (3, 10),
+    AN_A.member_prune: (0, 10),   # instant
+    AN_A.bot_add: (0, 10),        # instant
+}
+ANTINUKE_ROLE_GRANT_PERMS = ("administrator", "manage_guild", "manage_roles")
+
+AN_HITS = {}
+AN_PUNISHED = set()
+AN_DELETED_CHANNELS = {}   # channel_id -> (timestamp, channel object)
+AN_DELETED_ROLES = {}      # role_id -> (timestamp, kwargs)
+AN_BY_USER = {}            # (guild_id, user_id) -> {"del_ch": [], "del_role": [], "new_ch": [], "new_role": [], "bans": []}
+
+
+def antinuke_cfg(guild_id):
+    cfg = config.setdefault("antinuke", {}).setdefault(str(guild_id), {})
+    cfg.setdefault("enabled", True)
+    cfg.setdefault("whitelist", [])
+    return cfg
+
+
+def antinuke_is_safe(guild, user_id):
+    if bot.user and user_id == bot.user.id:
+        return True
+    if user_id in {OWNER_ID, guild.owner_id}:
+        return True
+    extras = {str(u) for u in config.get("extra_owners", {}).get(str(guild.id), [])}
+    if str(user_id) in extras:
+        return True
+    return str(user_id) in {str(u) for u in antinuke_cfg(guild.id)["whitelist"]}
+
+
+async def antinuke_log(guild, description, title="🛡️ Anti-Nuke"):
+    cfg = antinuke_cfg(guild.id)
+    channel = guild.get_channel(int(cfg["log_channel"])) if cfg.get("log_channel") else get_log_channel(guild)
+    embed = discord.Embed(title=title, description=description, color=discord.Color.red(), timestamp=discord.utils.utcnow())
+    embed.set_footer(text="MEMBERS RUSH • Anti-Nuke")
+    if channel:
+        try:
+            await channel.send(embed=embed, allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            pass
+    owner = guild.owner
+    if owner:
+        try:
+            await owner.send(embed=embed)
+        except (discord.HTTPException, discord.Forbidden):
+            pass
+
+
+def _an_bucket(guild_id, user_id):
+    return AN_BY_USER.setdefault((guild_id, user_id), {"del_ch": [], "del_role": [], "new_ch": [], "new_role": [], "bans": []})
+
+
+@bot.listen("on_guild_channel_delete")
+async def antinuke_cache_channel(channel):
+    AN_DELETED_CHANNELS[channel.id] = (time.time(), channel)
+    for key in [k for k, v in AN_DELETED_CHANNELS.items() if time.time() - v[0] > 180]:
+        AN_DELETED_CHANNELS.pop(key, None)
+
+
+@bot.listen("on_guild_role_delete")
+async def antinuke_cache_role(role):
+    AN_DELETED_ROLES[role.id] = (time.time(), dict(
+        guild=role.guild, name=role.name, permissions=role.permissions, colour=role.colour,
+        hoist=role.hoist, mentionable=role.mentionable, position=role.position))
+    for key in [k for k, v in AN_DELETED_ROLES.items() if time.time() - v[0] > 180]:
+        AN_DELETED_ROLES.pop(key, None)
+
+
+@bot.listen("on_audit_log_entry_create")
+async def antinuke_watch(entry):
+    guild = entry.guild
+    if guild is None or not antinuke_cfg(guild.id)["enabled"]:
+        return
+    user = entry.user
+    if user is None or antinuke_is_safe(guild, user.id):
+        return
+    action = entry.action
+    target_id = getattr(entry.target, "id", None)
+
+    # --- dangerous permission hand-outs (instant) ---
+    if action == AN_A.member_role_update:
+        added = getattr(entry.after, "roles", None) or []
+        risky = []
+        for r in added:
+            role = guild.get_role(r.id)
+            if role and any(getattr(role.permissions, p) for p in ANTINUKE_ROLE_GRANT_PERMS):
+                risky.append(role)
+        if risky:
+            member = guild.get_member(target_id) if target_id else None
+            if member:
+                try:
+                    await member.remove_roles(*risky, reason="Anti-Nuke: unauthorised dangerous role grant")
+                except discord.HTTPException:
+                    pass
+            await antinuke_punish(guild, user, "dangerous role grant", extra=f"Roles removed: {', '.join(r.name for r in risky)}")
+        return
+    if action == AN_A.role_update:
+        before = getattr(entry.before, "permissions", None)
+        after = getattr(entry.after, "permissions", None)
+        if after is not None and after.administrator and not (before is not None and before.administrator):
+            role = guild.get_role(target_id) if target_id else None
+            if role and before is not None:
+                try:
+                    await role.edit(permissions=before, reason="Anti-Nuke: unauthorised admin grant")
+                except discord.HTTPException:
+                    pass
+            await antinuke_punish(guild, user, "granted Administrator to a role")
+        return
+
+    if action not in ANTINUKE_LIMITS:
+        return
+    bucket = _an_bucket(guild.id, user.id)
+    if target_id:
+        if action == AN_A.channel_delete: bucket["del_ch"].append(target_id)
+        elif action == AN_A.role_delete: bucket["del_role"].append(target_id)
+        elif action == AN_A.channel_create: bucket["new_ch"].append(target_id)
+        elif action == AN_A.role_create: bucket["new_role"].append(target_id)
+        elif action == AN_A.ban: bucket["bans"].append(target_id)
+
+    limit, window = ANTINUKE_LIMITS[action]
+    hits = AN_HITS.setdefault((guild.id, user.id, action), [])
+    now = time.monotonic()
+    hits.append(now)
+    hits[:] = [t for t in hits if now - t <= window]
+    if len(hits) > limit:
+        extra = None
+        if action == AN_A.bot_add and entry.target:
+            try:
+                await guild.ban(discord.Object(id=entry.target.id), reason="Anti-Nuke: unauthorised bot")
+                extra = f"Unauthorised bot banned: `{entry.target}`"
+            except discord.HTTPException:
+                pass
+        await antinuke_punish(guild, user, action.name.replace("_", " "), extra=extra)
+
+
+async def antinuke_punish(guild, user, reason, extra=None):
+    key = (guild.id, user.id)
+    if key in AN_PUNISHED:
+        return
+    AN_PUNISHED.add(key)
+    try:
+        punished = False
+        try:
+            await guild.ban(discord.Object(id=user.id), reason=f"Anti-Nuke: {reason}", delete_message_seconds=0)
+            punished = True
+        except discord.HTTPException:
+            member = guild.get_member(user.id)
+            if member:
+                try:
+                    keep = [r for r in member.roles if r.is_default() or r.managed]
+                    await member.edit(roles=keep, reason=f"Anti-Nuke: {reason}")
+                    punished = True
+                except discord.HTTPException:
+                    pass
+
+        await asyncio.sleep(1)
+        bucket = AN_BY_USER.pop(key, None) or {"del_ch": [], "del_role": [], "new_ch": [], "new_role": [], "bans": []}
+        restored_c = restored_r = cleaned = unbanned = 0
+        for cid in bucket["del_ch"]:
+            cached = AN_DELETED_CHANNELS.get(cid)
+            if cached:
+                try:
+                    new = await cached[1].clone(reason="Anti-Nuke restore")
+                    try:
+                        await new.edit(position=cached[1].position)
+                    except discord.HTTPException:
+                        pass
+                    restored_c += 1
+                except discord.HTTPException:
+                    pass
+        for rid in bucket["del_role"]:
+            cached = AN_DELETED_ROLES.get(rid)
+            if cached:
+                kw = dict(cached[1])
+                g = kw.pop("guild")
+                pos = kw.pop("position")
+                try:
+                    role = await g.create_role(**kw, reason="Anti-Nuke restore")
+                    try:
+                        await role.edit(position=max(1, pos))
+                    except discord.HTTPException:
+                        pass
+                    restored_r += 1
+                except discord.HTTPException:
+                    pass
+        for cid in bucket["new_ch"]:
+            ch = guild.get_channel(cid)
+            if ch:
+                try:
+                    await ch.delete(reason="Anti-Nuke cleanup"); cleaned += 1
+                except discord.HTTPException:
+                    pass
+        for rid in bucket["new_role"]:
+            role = guild.get_role(rid)
+            if role:
+                try:
+                    await role.delete(reason="Anti-Nuke cleanup"); cleaned += 1
+                except discord.HTTPException:
+                    pass
+        for uid in bucket["bans"]:
+            try:
+                await guild.unban(discord.Object(id=uid), reason="Anti-Nuke: undo mass ban"); unbanned += 1
+            except discord.HTTPException:
+                pass
+
+        lines = [
+            f"**Offender:** {user} (`{user.id}`)",
+            f"**Trigger:** {reason}",
+            f"**Punished:** {'✅ banned / roles stripped' if punished else '❌ failed — move my role to the TOP of the role list!'}",
+            f"**Restored:** {restored_c} channels, {restored_r} roles",
+            f"**Cleaned up:** {cleaned} spam objects • **Unbanned:** {unbanned}",
+        ]
+        if extra:
+            lines.append(extra)
+        await antinuke_log(guild, "\n".join(lines))
+        await asyncio.sleep(30)
+    finally:
+        AN_PUNISHED.discard(key)
+
+
+@bot.group(name="antinuke", invoke_without_command=True)
+@commands.guild_only()
+async def antinuke_group(ctx):
+    """Show anti-nuke status."""
+    cfg = antinuke_cfg(ctx.guild.id)
+    log_id = cfg.get("log_channel")
+    embed = discord.Embed(title=f"{EMOJIS['shield']} Anti-Nuke", color=discord.Color.green() if cfg["enabled"] else discord.Color.red())
+    embed.add_field(name="Status", value="Enabled" if cfg["enabled"] else "Disabled", inline=True)
+    embed.add_field(name="Alert channel", value=f"<#{log_id}>" if log_id else "Default log channel", inline=True)
+    embed.add_field(name="Whitelisted", value=str(len(cfg["whitelist"])), inline=True)
+    embed.add_field(name="Protects against", inline=False, value=(
+        f"{EMOJIS['bullet']} Mass channel / role delete & create\n"
+        f"{EMOJIS['bullet']} Mass ban / kick, member prune (instant)\n"
+        f"{EMOJIS['bullet']} Webhook & emoji spam\n"
+        f"{EMOJIS['bullet']} Unauthorised bot adds (instant, bot gets banned)\n"
+        f"{EMOJIS['bullet']} Handing out Administrator / Manage Server / Manage Roles\n"
+        f"{EMOJIS['bullet']} Auto-restore of deleted channels & roles, auto-undo of mass bans"))
+    embed.set_footer(text=f"{get_server_prefix(ctx.guild.id)}antinuke on|off|log #channel • {get_server_prefix(ctx.guild.id)}whitelist add|remove|list")
+    await ctx.reply(embed=embed, mention_author=False)
+
+
+@antinuke_group.command(name="on")
+@commands.guild_only()
+async def antinuke_on(ctx):
+    if not user_is_owner(ctx):
+        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the server owner or trusted owners can change anti-nuke.", color=discord.Color.red()))
+    antinuke_cfg(ctx.guild.id)["enabled"] = True
+    save_config()
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Anti-Nuke is now **enabled**.", color=discord.Color.green()))
+
+
+@antinuke_group.command(name="off")
+@commands.guild_only()
+async def antinuke_off(ctx):
+    if not user_is_owner(ctx):
+        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the server owner or trusted owners can change anti-nuke.", color=discord.Color.red()))
+    antinuke_cfg(ctx.guild.id)["enabled"] = False
+    save_config()
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['warning']} Anti-Nuke is now **disabled**.", color=discord.Color.orange()))
+
+
+@antinuke_group.command(name="log")
+@commands.guild_only()
+async def antinuke_log_cmd(ctx, channel: discord.TextChannel):
+    if not user_is_owner(ctx):
+        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the server owner or trusted owners can change anti-nuke.", color=discord.Color.red()))
+    antinuke_cfg(ctx.guild.id)["log_channel"] = channel.id
+    save_config()
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Anti-Nuke alerts will go to {channel.mention}.", color=discord.Color.green()))
+
+
+@bot.group(name="whitelist", aliases=["wl"], invoke_without_command=True)
+@commands.guild_only()
+async def whitelist_group(ctx):
+    p = get_server_prefix(ctx.guild.id)
+    await ctx.reply(embed=discord.Embed(description=f"Usage: `{p}whitelist add @user` • `{p}whitelist remove @user` • `{p}whitelist list`", color=discord.Color(0x2ECC71)))
+
+
+@whitelist_group.command(name="add")
+@commands.guild_only()
+async def whitelist_add(ctx, user: discord.User):
+    if not user_is_owner(ctx):
+        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the server owner or trusted owners can edit the whitelist.", color=discord.Color.red()))
+    wl = antinuke_cfg(ctx.guild.id)["whitelist"]
+    if str(user.id) not in {str(u) for u in wl}:
+        wl.append(str(user.id))
+        save_config()
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} {user.mention} is now whitelisted from anti-nuke.", color=discord.Color.green()), allowed_mentions=discord.AllowedMentions.none())
+
+
+@whitelist_group.command(name="remove")
+@commands.guild_only()
+async def whitelist_remove(ctx, user: discord.User):
+    if not user_is_owner(ctx):
+        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} Only the server owner or trusted owners can edit the whitelist.", color=discord.Color.red()))
+    cfg = antinuke_cfg(ctx.guild.id)
+    cfg["whitelist"] = [u for u in cfg["whitelist"] if str(u) != str(user.id)]
+    save_config()
+    await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} {user.mention} removed from the whitelist.", color=discord.Color.green()), allowed_mentions=discord.AllowedMentions.none())
+
+
+@whitelist_group.command(name="list")
+@commands.guild_only()
+async def whitelist_list(ctx):
+    wl = antinuke_cfg(ctx.guild.id)["whitelist"]
+    text = "\n".join(f"<@{u}>" for u in wl) or "Nobody. The server owner, bot owner and trusted owners are always safe."
+    await ctx.reply(embed=discord.Embed(title=f"{EMOJIS['shield']} Anti-Nuke Whitelist", description=text, color=discord.Color(0x2ECC71)), allowed_mentions=discord.AllowedMentions.none())
+
+
+# ==============================================================================
+# DAILY INVITE WINNER (>setdailyinvite)
+# ==============================================================================
+
+DAILY_INVITE_REWARD = 1000
+DAILY_INVITE_TASK = None
+
+
+def utc_day_key(offset_days=0):
+    return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=offset_days)).strftime("%Y-%m-%d")
+
+
+def daily_invite_cfg(guild_id):
+    return config.setdefault("daily_invites", {}).setdefault(str(guild_id), {})
+
+
+def record_daily_invite(guild_id, inviter_id, invitee_id):
+    cfg = daily_invite_cfg(guild_id)
+    if not cfg.get("channel"):
+        return
+    day = cfg.setdefault("days", {}).setdefault(utc_day_key(), {"counts": {}, "invitees": {}})
+    if str(invitee_id) in day["invitees"]:
+        return
+    day["invitees"][str(invitee_id)] = str(inviter_id)
+    day["counts"][str(inviter_id)] = int(day["counts"].get(str(inviter_id), 0)) + 1
+    mark_config_dirty()
+
+
+def forget_daily_invite(guild_id, invitee_id):
+    """If someone leaves, their invite no longer counts (stops join/leave farming)."""
+    cfg = config.get("daily_invites", {}).get(str(guild_id))
+    if not cfg:
+        return
+    for day in cfg.get("days", {}).values():
+        inviter = day["invitees"].pop(str(invitee_id), None)
+        if inviter:
+            day["counts"][inviter] = max(0, int(day["counts"].get(inviter, 0)) - 1)
+            mark_config_dirty()
+
+
+async def announce_daily_invite_winner(guild, cfg, day_key, data):
+    ranked = sorted(((int(n), uid) for uid, n in data.get("counts", {}).items() if int(n) > 0), key=lambda x: -x[0])
+    winner = next(((n, uid) for n, uid in ranked if guild.get_member(int(uid))), None)
+    if not winner:
+        return
+    count, uid = winner
+    acc = get_eco_account(guild.id, int(uid))
+    acc["wallet"] += DAILY_INVITE_REWARD
+    acc["total_earned"] += DAILY_INVITE_REWARD
+    save_config()
+
+    channel = guild.get_channel(int(cfg["channel"])) if cfg.get("channel") else None
+    if not isinstance(channel, discord.TextChannel):
+        return
+    embed = discord.Embed(
+        title=f"{EMOJIS['announcement']} Daily Invite Winner",
+        description=(f"Congratulations <@{uid}>! {EMOJIS['welcome']}\n\n"
+                     f"{EMOJIS['bullet']} You invited **{count}** new member{'s' if count != 1 else ''} on **{day_key}** (UTC)\n"
+                     f"{EMOJIS['bullet']} Reward: {fmt_money(guild.id, DAILY_INVITE_REWARD)} — added to your wallet!"),
+        color=discord.Color(0x2ECC71), timestamp=discord.utils.utcnow())
+    others = [f"`#{i}` <@{u}> — **{n}**" for i, (n, u) in enumerate(ranked[1:4], start=2)]
+    if others:
+        embed.add_field(name="Runners-up", value="\n".join(others), inline=False)
+    embed.set_footer(text="Invite friends today to win tomorrow!")
+    apply_embed_theme(guild.id, embed)
+    try:
+        await channel.send(content=f"<@{uid}>", embed=embed, allowed_mentions=discord.AllowedMentions(users=[discord.Object(id=int(uid))]))
+    except discord.HTTPException:
+        logging.exception("Could not post daily invite winner")
+
+
+async def process_daily_invites():
+    today = utc_day_key()
+    changed = False
+    for gid, cfg in list(config.get("daily_invites", {}).items()):
+        guild = bot.get_guild(int(gid))
+        if not guild:
+            continue
+        for day_key in sorted(k for k in list(cfg.get("days", {})) if k < today):
+            data = cfg["days"].pop(day_key)
+            changed = True
+            try:
+                await announce_daily_invite_winner(guild, cfg, day_key, data)
+            except Exception:
+                logging.exception("Daily invite announcement failed for guild %s", gid)
+    if changed:
+        save_config()
+
+
+async def daily_invite_loop():
+    await bot.wait_until_ready()
+    while not bot.is_closed():
+        try:
+            await process_daily_invites()
+        except Exception:
+            logging.exception("Daily invite loop error")
+        await asyncio.sleep(30)
+
+
+@bot.command(name="setdailyinvite", aliases=["setdailyinvites"])
+@commands.guild_only()
+async def setdailyinvite(ctx, channel: discord.TextChannel = None):
+    """Set the channel where the top inviter of the day is announced and rewarded."""
+    if not (user_is_supervisor(ctx) or ctx.author.guild_permissions.manage_guild):
+        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['error']} You need **Manage Server** or the supervisor role to use this.", color=discord.Color.red()))
+    if channel is None:
+        cfg = daily_invite_cfg(ctx.guild.id)
+        current = f"<#{cfg['channel']}>" if cfg.get("channel") else "not set"
+        p = get_server_prefix(ctx.guild.id)
+        return await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['bullet']} Daily invite channel: {current}\nUsage: `{p}setdailyinvite #channel`", color=discord.Color(0x2ECC71)))
+    cfg = daily_invite_cfg(ctx.guild.id)
+    cfg["channel"] = channel.id
+    cfg.setdefault("days", {})
+    save_config()
+    await ctx.reply(embed=discord.Embed(
+        title=f"{EMOJIS['success']} Daily Invite Channel Set",
+        description=(f"Every day at **00:00 UTC** I'll announce the member with the most invites in {channel.mention} "
+                     f"and give them {fmt_money(ctx.guild.id, DAILY_INVITE_REWARD)}.\n\n"
+                     f"{EMOJIS['bullet']} Invites are counted from now on. Members who leave stop counting for their inviter."),
+        color=discord.Color(0x2ECC71)))
+
+
+@bot.command(name="dailyinvites", aliases=["topinvites", "todayinvites"])
+@commands.guild_only()
+async def dailyinvites(ctx):
+    """Show today's invite leaderboard."""
+    cfg = daily_invite_cfg(ctx.guild.id)
+    counts = cfg.get("days", {}).get(utc_day_key(), {}).get("counts", {})
+    ranked = sorted(((int(n), u) for u, n in counts.items() if int(n) > 0), key=lambda x: -x[0])[:10]
+    text = "\n".join(f"`#{i}` <@{u}> — **{n}**" for i, (n, u) in enumerate(ranked, start=1)) or "Nobody has invited anyone yet today."
+    embed = discord.Embed(title=f"{EMOJIS['welcome']} Today's Invite Leaderboard", description=text, color=discord.Color(0x2ECC71))
+    embed.set_footer(text=f"Resets 00:00 UTC • Winner gets {DAILY_INVITE_REWARD:,} coins")
+    apply_embed_theme(ctx.guild.id, embed)
+    await ctx.reply(embed=embed, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
+
+
 @bot.event
 async def on_ready():
     await install_application_emojis()
@@ -5683,6 +6162,9 @@ async def on_ready():
         await refresh_invite_cache(guild)
     bot.add_view(TicketSetupView())
     bot.add_view(TicketControlView())
+    global DAILY_INVITE_TASK
+    if DAILY_INVITE_TASK is None or DAILY_INVITE_TASK.done():
+        DAILY_INVITE_TASK = asyncio.create_task(daily_invite_loop())
     activity_settings = config.get("activity", {})
     if activity_settings.get("type") in ACTIVITY_TYPES and activity_settings.get("text"):
         await apply_bot_activity(activity_settings["type"], activity_settings["text"])
@@ -5714,10 +6196,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
-
-
 
 

@@ -6227,7 +6227,56 @@ async def joingate_cmd(ctx, state: Literal["on", "off"] = None, min_age: int = N
     save_config()
     await ctx.reply(embed=discord.Embed(description=f"{EMOJIS['success']} Join Gate is now **{state}**.", color=discord.Color(0x2ECC71)))
 
+@bot.command(name="nitro")
+@commands.guild_only()
+async def nitro_command(ctx):
+    """Sends a realistic Discord Nitro gift link and simulates thank-you messages."""
+    # Delete the user's command trigger message to keep chat clean
+    try:
+        await ctx.message.delete()
+    except (discord.Forbidden, discord.HTTPException):
+        pass
 
+    # Generate a random pseudo-Nitro gift code
+    random_code = "".join(random.choices("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", k=16))
+    gift_url = f"https://discord.gift/{random_code}"
+
+    # Build the realistic Discord Nitro embed
+    embed = discord.Embed(
+        title="Discord Nitro",
+        url=gift_url,
+        description=f"Here is your code! Click to claim: {gift_url}",
+        color=discord.Color.from_rgb(114, 137, 218) # Discord Blurple
+    )
+    # Add the visual banner thumbnail/image styling typical of gift links
+    embed.set_image(url="https://images-ext-1.discordapp.net/external/uU0wQ7N31x75tW487z_mK6K1U2_5C2bXmOqN5v4G0g4/https/i.imgur.com/3Z6H9tD.png")
+    embed.set_footer(text="discord.gift")
+
+    # 1. Send the bot's Nitro gift drop message
+    bot_msg = await ctx.send(
+        content=f"Here is your code! Click to claim: {gift_url}",
+        embed=embed,
+        allowed_mentions=discord.AllowedMentions.none()
+    )
+
+    # 2. Simulate typing and delay before the user sends the thank you messages
+    await asyncio.sleep(2.0)
+    
+    # Send message 1: Excitement
+    async with ctx.channel.typing():
+        await asyncio.sleep(1.5)
+    await ctx.send(f"Omg thank you so much!!! {EMOJIS.get('success', '🎉')}", allowed_mentions=discord.AllowedMentions.none())
+
+    # Send message 2: Gratitude
+    await asyncio.sleep(1.2)
+    async with ctx.channel.typing():
+        await asyncio.sleep(1.2)
+    await ctx.send(f"Tysm!!! ty ty {EMOJIS.get('welcome', '💖')}", allowed_mentions=discord.AllowedMentions.none())
+
+    # Send message 3: Casual wrap-up
+    await asyncio.sleep(0.8)
+    await ctx.send("ty ty etc", allowed_mentions=discord.AllowedMentions.none())
+    
 # ==============================================================================
 # DAILY INVITE PROMOTIONS (>setdailyinvite)
 # ==============================================================================
